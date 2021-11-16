@@ -3,567 +3,318 @@
 """
 	Author : Amoghavarsha S G
 """
-
 import cv2
-import cv2.aruco as aruco
 import numpy as np
 import threading
-import serial
 from time import sleep, perf_counter
-import io
-import math
 from multiprocessing import Process, Array, Value
-import traceback
+import json
+import subprocess
+import platform
+from iot import IOT
+import yaml
+# import traceback
+# import pickle
 
-###### Written in this Folder ######
-from PID import PID
-from graphPlotter import qtPlotter as plotGraph
-
-
-class ServoController:
-
-	def __init__(self, xOffset=1570, yOffset=1420, seperator='#', stopByte='$', platePiviotLen=8, servoArmLen=3.2, cameraDistance=45):
-		"""
-			Initialize a new Servo Controller
-			:param platePiviotLen: Distance between connected servo rod and piviot
-			:param servoArmLen: Length of the servo arm not the push rod
-		"""
-		self.arduinoConnected = False
-		self.xOffset = xOffset
-		self.yOffset = yOffset
-		self.seperator = seperator
-		self.stopByte = stopByte
-		self.platePiviotLen = platePiviotLen
-		self.servoArmLen = servoArmLen
-		self.cameraDistance = cameraDistance
-		self.xOffsetAngle = self.angleMap(xOffset)
-		self.yOffsetAngle = self.angleMap(yOffset)
-		self.xPlateAngle = 0
-		self.yPlateAngle = 0
-		self.frameCenter = ()
-		self.ballPose = ()
-
-		try:
-			self.arduino = serial.Serial(port='COM3', baudrate=115200, write_timeout=0.01)
-			self.arduinoConnected = True
-		except serial.SerialException:
-			print(" Unable to Open Serial Port ".center(50, '■'), end='\n\n')
-
-	def sendArduino(self, xPid=0, yPid=0):
-		xServoUs = int(xPid + self.xOffset)
-		yServoUs = int(yPid + self.yOffset)
-		#print(f"xPid: {xServoUs} yPid: {yServoUs}")
-		
-		if self.arduinoConnected:
-			cmd = f"{xServoUs}{self.seperator}{yServoUs}{self.stopByte}"
-			self.arduino.write(cmd.encode('utf-8'))
-			self.arduino.flush()
-
-		servoXangle = self.angleMap(xServoUs) - self.xOffsetAngle
-		servoYangle = self.angleMap(yServoUs) - self.yOffsetAngle
-		xDisplacement = self.servoArmLen * math.sin(servoXangle)
-		yDisplacement = self.servoArmLen * math.sin(servoYangle)
-		self.xPlateAngle = math.asin(xDisplacement/self.platePiviotLen)
-		self.yPlateAngle = math.asin(yDisplacement/self.platePiviotLen)
-
-	def errorMap(self, error, axis):
-		if not self.frameCenter:
-			return error
-		if axis == "x":
-			rError = self.frameCenter[0] - self.ballPose[0] 
-			rPlateAngle = self.yPlateAngle
-			otherError = abs((self.frameCenter[1] - self.ballPose[1])*math.sin(self.yPlateAngle))/self.cameraDistance
-			ownError = error/math.cos(self.xPlateAngle)
-		else:
-			rError = self.frameCenter[1] - self.ballPose[1]
-			rPlateAngle = self.xPlateAngle
-			otherError = abs((self.frameCenter[0] - self.ballPose[0])*math.sin(self.xPlateAngle))/self.cameraDistance
-			ownError = error/math.cos(self.yPlateAngle)
-		if error == 0:
-			return error
-		if rPlateAngle > 0:
-			if rError > 0:
-				error_ = ownError #+ ((error/abs(error)) * otherError)
-			else:
-				error_ = ownError #+  ((error/abs(error)) * - otherError)
-		else:
-			if rError > 0:
-				error_ = ownError #+  ((error/abs(error)) * - otherError)
-			else:
-				error_ = ownError #+ ((error/abs(error)) * otherError)
-		
-		#print(self.xPlateAngle*180/math.pi, self.yPlateAngle*180/math.pi, error, error_, axis)
-		return error_
-
-	@staticmethod
-	def angleMap(val):
-		if val <= 2500 and val >= 500:
-			return 0 + ( (val-500) * ( (math.pi - 0)/(2500-500) ))
-		return 0
-
-	def closeSerialPort(self):
-		if self.arduinoConnected:
-			self.arduino.close()
-			print(" Closed Serial Port ".center(50, '■'))
-
-
-class SetDispController(threading.Thread):
-
+class SetDispMqttController:
 	def __init__(self):
-		super().__init__()
+		with open('broker_config.yaml', 'r') as file_open:
+			broker_url = yaml.load(file_open, yaml.SafeLoader)['broker_url']
+		self.iot = IOT(broker_url=broker_url)
+
 		self.lock = threading.Lock()
-		self.setLock = threading.Lock()
-		self._frame = None
-		self._ballPose = ()
-		self.lastId = -1
-		self.mode = 0
-		self.twoPi = 6.28
-		self.r = 200
-		self.f = 0.1
+		self.set_lock = threading.Lock()
+		self.table_img = cv2.imread("background.jpg", -1)
+		self.ball_img = cv2.imread("ball.jpg", -1)
+		self.return_img = np.array(self.table_img)
+		self.ball_height, self.ball_width = self.ball_img.shape[:2]
+		self.table_height, self.table_width = self.table_img.shape[:2]
+		self.ball_center = (self.ball_width//2, self.ball_height//2) 
+		self.frame_center = (self.table_width//2, self.table_height//2)
+		self._setpoint = ()
+		self._ball_pose = ()
 		self.graphShown = 0
-		self.rad = 0
-		self.frameCenter = ()
-		self._setpoints = ()
 		self.terminated = 0
-		self.daemon = True
-		if showInterface:
-			self.start()
+		self.mode = 0
+		# self.animated = {}
+
+		self.setpoint = self.frame_center
+		
+		self.iot.mqtt_subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)
+
+		# if show_interface:
+		# 	self.start()
 
 	def run(self):
-		global done
-		while self.frame is None and not self.terminated:
+		while self.ball_pose == () and not self.terminated:
 			sleep(0.01)
 		if self.terminated:
 			return
 
 		cv2.namedWindow('Processed Video Feed', cv2.WINDOW_NORMAL)
-		height, width = self.frame.shape[:2]
+		height, width = self.return_img.shape[:2]
 		cv2.resizeWindow('Processed Video Feed', int(width*1.1), int(height*1.1))
-		cv2.setMouseCallback('Processed Video Feed', self.setSetpoints)
+		cv2.setMouseCallback('Processed Video Feed', self.set_setpoint)
 		if DEBUG:
-			cv2.createTrackbar('xKp(x100)', 'Processed Video Feed', 0, 500, lambda x: self.setTuning(x/100, "xKp"))
-			cv2.createTrackbar('xKi(x100)', 'Processed Video Feed', 0, 100, lambda x: self.setTuning(x/100, "xKi"))
-			cv2.createTrackbar('xKd(x100)', 'Processed Video Feed', 0, 1500, lambda x: self.setTuning(x/100, "xKd"))
-			xKp, xKi, xKd = xAxisPid.tunings
-			cv2.setTrackbarPos('xKp(x100)', 'Processed Video Feed', int(xKp*100))
-			cv2.setTrackbarPos('xKi(x100)', 'Processed Video Feed', int(xKi*100))
-			cv2.setTrackbarPos('xKd(x100)', 'Processed Video Feed', int(xKd*100))
+			cv2.createTrackbar('x_Kp(x100)', 'Processed Video Feed', 0, 500, lambda x: self.set_tuning(x/100, "x_Kp"))
+			cv2.createTrackbar('x_Ki(x100)', 'Processed Video Feed', 0, 100, lambda x: self.set_tuning(x/100, "x_Ki"))
+			cv2.createTrackbar('x_Kd(x100)', 'Processed Video Feed', 0, 1500, lambda x: self.set_tuning(x/100, "x_Kd"))
+			x_Kp, x_Ki, x_Kd = 1, 0, 0 #xAxisPid.tunings
+			cv2.setTrackbarPos('x_Kp(x100)', 'Processed Video Feed', int(x_Kp*100))
+			cv2.setTrackbarPos('x_Ki(x100)', 'Processed Video Feed', int(x_Ki*100))
+			cv2.setTrackbarPos('x_Kd(x100)', 'Processed Video Feed', int(x_Kd*100))
 
-			cv2.createTrackbar('yKp(x100)', 'Processed Video Feed', 0, 500, lambda x: self.setTuning(x/100, "yKp"))
-			cv2.createTrackbar('yKi(x100)', 'Processed Video Feed', 0, 100, lambda x: self.setTuning(x/100, "yKi"))
-			cv2.createTrackbar('yKd(x100)', 'Processed Video Feed', 0, 1500, lambda x: self.setTuning(x/100, "yKd"))
-			yKp, yKi, yKd = yAxisPid.tunings
-			cv2.setTrackbarPos('yKp(x100)', 'Processed Video Feed', int(yKp*100))
-			cv2.setTrackbarPos('yKi(x100)', 'Processed Video Feed', int(yKi*100))
-			cv2.setTrackbarPos('yKd(x100)', 'Processed Video Feed', int(yKd*100))
+			cv2.createTrackbar('y_Kp(x100)', 'Processed Video Feed', 0, 500, lambda x: self.set_tuning(x/100, "y_Kp"))
+			cv2.createTrackbar('y_Ki(x100)', 'Processed Video Feed', 0, 100, lambda x: self.set_tuning(x/100, "y_Ki"))
+			cv2.createTrackbar('y_Kd(x100)', 'Processed Video Feed', 0, 1500, lambda x: self.set_tuning(x/100, "y_Kd"))
+			y_Kp, y_Ki, y_Kd = 1, 0, 0#yAxisPid.tunings
+			cv2.setTrackbarPos('y_Kp(x100)', 'Processed Video Feed', int(y_Kp*100))
+			cv2.setTrackbarPos('y_Ki(x100)', 'Processed Video Feed', int(y_Ki*100))
+			cv2.setTrackbarPos('y_Kd(x100)', 'Processed Video Feed', int(y_Kd*100))
 
 		while not self.terminated:
-			frame = self.frame # to reduce lock time
-			ballPose = self.ballPose
-
-			if self.mode == 1: # draw circle mode
-				self.setAllSetpoints(self.getCircleCorr())
-				cv2.circle(frame, self.frameCenter, self.r ,(255,255,255),1)
+			ball_pose, radius = self.ball_pose
+			setpoint = self.setpoint
+			self.animate(ball_pose, radius)
+			if self.mode == 1:
+				cv2.circle(self.return_img, self.frame_center, self.r ,(255,255,255),1)
 			elif self.mode == 2: # draw 8 mode
-				self.setAllSetpoints(self.get8Corr())
-				cv2.circle(frame, (self.frameCenter[0]-self.r, self.frameCenter[1]), self.r ,(255,255,255),1)
-				cv2.circle(frame, (self.frameCenter[0]+self.r, self.frameCenter[1]), self.r ,(255,255,255),1)
+				cv2.circle(self.return_img, (self.frame_center[0]-self.r, self.frame_center[1]), self.r ,(255,255,255),1)
+				cv2.circle(self.return_img, (self.frame_center[0]+self.r, self.frame_center[1]), self.r ,(255,255,255),1)
 
-			cv2.circle(frame, self.setpoints, 4 ,(0, 255, 0), -1)
+			cv2.circle(self.return_img, setpoint, 4 ,(0, 255, 0), -1)
 
-			if ballPose: # draw circle around the ball and arrowed line b/w ball and setpoint
-				cv2.circle(frame, ballPose[0], ballPose[1], (0, 255, 255), 2)
-				cv2.arrowedLine(frame, ballPose[0], self.setpoints, (0, 0, 255), 2)
+			if ball_pose: # draw circle around the ball and arrowed line b/w ball and setpoint
+				cv2.circle(self.return_img, ball_pose, radius, (0, 255, 255), 2)
+				cv2.arrowedLine(self.return_img, ball_pose, setpoint, (0, 0, 255), 2)
 
-			cv2.imshow('Processed Video Feed', frame)
-			key = cv2.waitKey(1) & 0xFF
+			cv2.imshow('Processed Video Feed', self.return_img)
+			key = chr(cv2.waitKey(1) & 0xFF)
 
-			if key == ord('q'):
-				done = 1
+			if key in ['q', 'o', '8', 'r', 'f', '-', '+']:
+				threading.Thread(target=self.iot.mqtt_publish, args=('key_cmd', key, 2)).start()
+
+			if key == 'q':
 				self.terminated = 1
-				plotTerminate.value = 1
-			elif key == ord('o'):
+				# plotTerminate.value = 1
+			elif key == 'o':
 				self.mode = 1
 				self.r = 100
-				self.setAllSetpoints(self.getCircleCorr(reset=True))
-			elif key == ord('8'):
+				# self.setpoint(self.get_circle_corr(reset=True))
+			elif key == '8':
 				self.mode = 2
 				self.r = 90
-				self.setAllSetpoints(self.get8Corr(reset=True))
-			elif key == ord('r'):
+				# self.setpoint(self.get8Corr(reset=True))
+			elif key == 'r':
 				self.mode = 0
-				self.setAllSetpoints(self.frameCenter)
-			elif key == ord('g'):
-				if self.graphShown:
-					plotTerminate.value = 1
-					self.graphShown = 0
-				else:
-					self.graphShown = 1
-					plotTerminate.value = 0
-					args = (setpointPlot, ballPosePlot, plotTerminate)
-					kwargs = {'identifier': 'GRAPH', 'maxLimit': (max(width, height)) + 50}
-					Process(target=plotGraph, args=args, kwargs=kwargs).start()
+				self.setpoint = self.frame_center
+			# elif key == 'g':
+			# 	if self.graphShown:
+			# 		plotTerminate.value = 1
+			# 		self.graphShown = 0
+			# 	else:
+			# 		self.graphShown = 1
+			# 		plotTerminate.value = 0
+			# 		args = (setpointPlot, ball_posePlot, plotTerminate)
+			# 		kwargs = {'identifier': 'GRAPH', 'maxLimit': (max(width, height)) + 50}
+			# 		Process(target=plotGraph, args=args, kwargs=kwargs).start()
 
-			elif key == ord('f'):
-				self.f *= -1
-			elif key == ord('-'):
-				if self.f >= 0:
-					self.f -= 0.1
-				else:
-					self.f += 0.1
-			elif key == ord('+'):
-				if -3 < self.f < 3:
-					if self.f >= 0:
-						self.f += 0.1
-					else:
-						self.f -= 0.1
+			# elif key == 'f':
+			# 	self.f *= -1
+			# 	pass
+			# elif key == '-'):
+		# 	if self.f >= 0:
+			# 		self.f -= 0.1
+			# 	else:
+			# 		self.f += 0.1
+			# elif key == '+'):
+		# 	if -3 < self.f < 3:
+			# 		if self.f >= 0:
+			# 			self.f += 0.1
+			# 		else:
+			# 			self.f -= 0.1
 
 		cv2.destroyAllWindows()
 		cv2.waitKey(1)
 
-	def getCircleCorr(self, radOffset=0, reset=False, xCenterOffset=0, yCenterOffset=0):
-		#if -self.twoPi < self.rad < self.twoPi:
-		#else:
-		if not (-self.twoPi + radOffset < self.rad < self.twoPi + radOffset) or reset:
-			self.initialTime = perf_counter()
-			self.rad = radOffset
-		else:
-			self.rad = self.twoPi*self.f*(perf_counter() - self.initialTime) + radOffset
+	def animate(self, ball_pose, radius=25):
+		st_time = perf_counter()
+		# frame = self.animated.get(str(ball_pose), None)
+		# if not (frame is None):
+		# 	self.return_img = np.array(frame)
+		# 	fps.ptime_update((perf_counter() - st_time)*1000)
+		# 	fps.fps_update()
+		# 	return
 
-		centre = self.frameCenter[0] + xCenterOffset, self.frameCenter[1] + yCenterOffset
-		return int( centre[0] + self.r*np.cos(self.rad)), int(centre[1] + self.r*np.sin(self.rad))
+		if not (radius == 25):
+			self.ball_img = cv2.resize(self.ball_img, dsize=(2*radius, 2*radius), interpolation=cv2.INTER_LINEAR)
+		# cv2.circle(self.return_img, ball_pose, radius ,(255,255,255),-1)
+		if (ball_pose[1] - self.ball_center[1] > -self.ball_height) and (ball_pose[1] + self.ball_center[1] < self.table_height + self.ball_height) and (ball_pose[0] - self.ball_center[0] > -self.ball_width) and (ball_pose[0] + self.ball_center[0] < self.table_width + self.ball_width): 
+			tmin_x, tmin_y, tmax_x, tmax_y = ball_pose[0] - self.ball_center[0], ball_pose[1] - self.ball_center[1], ball_pose[0] + self.ball_center[0], ball_pose[1] + self.ball_center[1]
+			bmin_x, bmin_y, bmax_x, bmax_y = 0, 0, self.ball_width, self.ball_height
+			if tmin_x < 0:
+				bmin_x = abs(tmin_x)
+				tmin_x = 0
+			if tmax_x > self.table_width:
+				bmax_x = self.ball_width - (tmax_x - self.table_width)
+				tmax_x = self.table_width
+			if tmin_y < 0:
+				bmin_y = abs(tmin_y)
+				tmin_y = 0
+			if tmax_y > self.table_height:
+				bmax_y = self.ball_height - (tmax_y - self.table_height)
+				tmax_y = self.table_height
 
-	def get8Corr(self, reset=False):
-		if reset:
-			self.step = 0
-			self.f = 0.1
-		if not self.step:
-			if -self.twoPi < self.rad < self.twoPi:
-				x, y = self.getCircleCorr(reset=reset, xCenterOffset=-self.r)
-			else:
-				self.step = 1
-				self.f *= -1
-				x, y = self.getCircleCorr(reset=True, radOffset=self.twoPi/2, xCenterOffset=self.r)
-		else:
-			if -self.twoPi/2  < self.rad < self.twoPi*3/2:
-				x, y = self.getCircleCorr(reset=reset, radOffset=self.twoPi/2, xCenterOffset=self.r)
-			else:
-				self.step = 0
-				self.f *= -1
-				x, y = self.getCircleCorr(reset=True, xCenterOffset=-self.r)
-		return x, y
+			self.return_img = np.array(self.table_img)
+			return_img_roi = self.return_img[tmin_y:tmax_y, tmin_x:tmax_x]
+			cv2.add(return_img_roi, self.ball_img[bmin_y:bmax_y, bmin_x:bmax_x], dst=return_img_roi)
+			# self.animated[str(ball_pose)] = np.array(self.return_img)
 
-	@property
-	def frame(self):
-		with self.lock:
-			return self._frame
+		fps.ptime_update((perf_counter() - st_time)*1000)
+		fps.fps_update()
+		if fps.ready():
+			print(f"\rFPS: {fps.get_fps()} | Ptime: {fps.get_ptime()} ms".ljust(65), end='')
+			fps.reset()
 
-	@property
-	def ballPose(self):
-		with self.lock:
-			return self._ballPose
 
 	@property
-	def setpoints(self):
-		with self.setLock:
-			return self._setpoints
-
-	def setAllSetpoints(self, coordinate):
-		with self.setLock:
-			self._setpoints = coordinate
-		xAxisPid.setpoint, yAxisPid.setpoint = coordinate
-		setpointPlot[:] = coordinate
-
-	def setFrameNpose(self, frame, ballPose):
+	def ball_pose(self):
 		with self.lock:
-			self._frame = frame
-			self._ballPose = ballPose
-			if not self.frameCenter:
-				self.frameCenter = (frame.shape[1]//2, frame.shape[0]//2)
-				servoCtrl.frameCenter = self.frameCenter
-				self.setAllSetpoints(self.frameCenter)
+			return self._ball_pose
 
-	def setSetpoints(self, event, x, y, flags, param):
+	@ball_pose.setter
+	def ball_pose(self, ball_pose):
+		with self.lock:
+			self._ball_pose = ball_pose
+		# ball_posePlot[:] = ball_pose[0]
+
+	def pose_callback(self, client, userdata, msg):
+		pose = json.loads(msg.payload.decode('UTF-8'))
+		self.ball_pose = pose['ball_pose']
+		self.setpoint = pose['setpoint']
+
+	@property
+	def setpoint(self):
+		with self.set_lock:
+			return self._setpoint
+
+	@setpoint.setter
+	def setpoint(self, coordinate):
+		with self.set_lock:
+			self._setpoint = coordinate
+		# xAxisPid.setpoint, yAxisPid.setpoint = coordinate
+		# setpointPlot[:] = coordinate
+
+	def set_setpoint(self, event, x, y, flags, param):
 		if event == cv2.EVENT_LBUTTONDOWN:
 			self.mode = 0
-			self.setAllSetpoints((x, y))
+			self.setpoint = [x, y]
 
-	def setTuning(self, pos, parameter):
-		if parameter == "xKp":
-			xAxisPid.Kp = pos
-		elif parameter == "yKp":
-			yAxisPid.Kp = pos
-		elif parameter == "xKi":
-			xAxisPid.Ki = pos
-		elif parameter == "yKi":
-			yAxisPid.Ki = pos
-		elif parameter == "xKd":
-			xAxisPid.Kd = pos
-		elif parameter == "yKd":
-			yAxisPid.Kd = pos
-
-	def checkId(self, currentId):
-		if self.lastId > currentId:
-			return False
-		self.lastId = currentId
-		return True
-
-
-class ImageProcessor(threading.Thread):
-	def __init__(self, mat):
-		super().__init__()
-		self.id = perf_counter()
-		self.ballPose = ()
-		self.stream = io.BytesIO()
-		self.event = threading.Event()
-		self.terminated = False
-		#self.mat = cv2.getPerspectiveTransform(np.float32([[0,0], [449,0], [449,449], [0,449]]), np.float32([[0,0], [449,0], [449,449], [0,449]]))
-		self.mat = mat
-		self.lowerLimits = np.array([0, 150, 130])
-		self.upperLimits = np.array([32, 255, 255])
-		self.kernelOpen = np.ones((5, 5))
-		self.kernelClose = np.ones((5, 5))
-		self.frame = None
-		self.daemon = True
-		self.start()
-
-	def run(self):
-		# This method runs in a separate thread
-		global numNoBallFrames
-		while not self.terminated:
-			# Wait for an image to be written to the stream
-			if self.event.wait(1):
-				try:
-					if self.mat:
-						self.frame = self.frame[self.mat[1][0] : self.mat[1][1], self.mat[0][0] : self.mat[0][1]]
-					#self.frame = cv2.resize(self.frame, (480, 640))
-					#self.stream.seek(0)
-					#self.frame = cv2.imdecode(np.frombuffer(stream.read(), np.uint8), cv2.IMREAD_COLOR)
-					self.findBall()
-					with idLock:
-						if setdispCtrl.checkId(self.id):
-							if self.ballPose:
-								servoCtrl.ballPose = self.ballPose[0]
-								xPid = xAxisPid(self.ballPose[0][0])
-								yPid = yAxisPid(self.ballPose[0][1])
-								servoCtrl.sendArduino(xPid, yPid)
-								ballPosePlot[:] = self.ballPose[0]
-								numNoBallFrames = 0
-							else:
-								if numNoBallFrames >=60: # if Ball is not there for more than 60 frames make plate flat
-									servoCtrl.sendArduino(0, 0)
-									numNoBallFrames = 0
-									xAxisPid.reset(withI=False)
-									yAxisPid.reset(withI=False)
-								else:
-									numNoBallFrames +=1
-							#if showInterface:
-							setdispCtrl.setFrameNpose(self.frame, self.ballPose)
-						else:
-							fps.droppedFrames += 1
-
-				except serial.SerialTimeoutException:
-					print("Data Not Sent - TIMEOUT!!!!!")
-				except Exception as e:
-					print(e)
-					print(traceback.format_exc())
-				finally:
-					# Reset the stream and event
-					#self.stream.seek(0)
-					#self.stream.truncate()
-					self.event.clear()
-					fps.pTimeUpdate((perf_counter() - self.id)*1000)
-					# Return ourselves to the processorPool
-					with poolLock:
-						processorPool.append(self)
-
-	def findBall(self):
-
-		hsvFrame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2HSV)
-		mask = cv2.inRange(hsvFrame, self.lowerLimits, self.upperLimits)
-
-		maskOpen = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernelOpen)
-		maskClose = cv2.morphologyEx(maskOpen, cv2.MORPH_CLOSE, self.kernelClose)
-		contours, _ = cv2.findContours(maskClose, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-		#self.frame = maskClose
-		if contours:
-			ball = max(contours, key = cv2.contourArea)
-			if cv2.contourArea(ball) <= 0:
-				self.ballPose = ()
-				return False
-			((x,y), radius) = cv2.minEnclosingCircle(ball)
-			if radius < 12 or radius > 60:
-				self.ballPose = ()
-				return False			
-			self.ballPose = ((int(x), int(y)), int(radius))
-
-			#cv2.drawContours(self.frame, ball, -1, (255,255,255), 3)
-			#M = cv2.moments(ball)
-			#self.ballPose = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
-			#print(self.ballPose)
-			return True
-		self.ballPose = ()#((320, 240),10)
-		return False
+	def set_tuning(self, pos, parameter):
+		pass
+		# if parameter == "x_Kp":
+		# 	xAxisPid.Kp = pos
+		# elif parameter == "y_Kp":
+		# 	yAxisPid.Kp = pos
+		# elif parameter == "x_Ki":
+		# 	xAxisPid.Ki = pos
+		# elif parameter == "y_Ki":
+		# 	yAxisPid.Ki = pos
+		# elif parameter == "x_Kd":
+		# 	xAxisPid.Kd = pos
+		# elif parameter == "y_Kd":
+		# 	yAxisPid.Kd = pos
 
 
 class FPS():
-	def __init__(self, avgFrames=250):
-		self.nFrames = 0
-		self.avgFrames = avgFrames
-		self.pTimeVals = []
-		self.initialTime = perf_counter()
-		self._droppedFrames = 0
+	def __init__(self, avg_frames=30):
+		self.n_frames = 0
+		self.avg_frames = avg_frames
+		self.ptime_vals = []
+		self.initial_time = perf_counter()
+		self._dropped_frames = 0
 
-		self.pLock = threading.Lock()
-		self.dLock = threading.Lock()
+		self.plock = threading.Lock()
+		self.dlock = threading.Lock()
 
-	def fpsUpdate(self):
-		self.nFrames += 1
+	def fps_update(self):
+		self.n_frames += 1
 
-	def getFPS(self):
-		return int(self.nFrames/(perf_counter() - self.initialTime))
+	def get_fps(self):
+		return int(self.n_frames/(perf_counter() - self.initial_time))
 
-	def pTimeUpdate(self, pTime):
-		with self.pLock:
-			self.pTimeVals.append(pTime)
+	def ptime_update(self, pTime):
+		with self.plock:
+			self.ptime_vals.append(pTime)
 
-	def getpTime(self):
-		with self.pLock:
-			return round(sum(self.pTimeVals)/len(self.pTimeVals), 4), round(max(self.pTimeVals), 4)
+	def get_ptime(self):
+		with self.plock:
+			return round(sum(self.ptime_vals)/len(self.ptime_vals), 4), round(max(self.ptime_vals), 4)
 
 	def ready(self):
-		return self.nFrames >= self.avgFrames
+		return self.n_frames >= self.avg_frames
 
 	@property
-	def droppedFrames(self):
-		with self.dLock:
-			return self._droppedFrames
+	def dropped_frames(self):
+		with self.dlock:
+			return self._dropped_frames
 
-	@droppedFrames.setter
-	def droppedFrames(self, droppedFrames):
-		with self.dLock:
-			self._droppedFrames = droppedFrames
+	@dropped_frames.setter
+	def dropped_frames(self, dropped_frames):
+		with self.dlock:
+			self._dropped_frames = dropped_frames
 
 	def reset(self):
-		with self.pLock:
-			self.pTimeVals = []
-		self.droppedFrames = 0
-		self.nFrames = 0
-		self.initialTime = perf_counter()
+		with self.plock:
+			self.ptime_vals = []
+		self.dropped_frames = 0
+		self.n_frames = 0
+		self.initial_time = perf_counter()
 
-def findTable(cap, idsPresent):
-	shown = 0
-	mat = None
-	threshold = 5
-	while cap.isOpened():
-		ret, frame = cap.read()
-		grey_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-		upper_bound = (threshold, threshold, threshold)
-		grey_frame = 255 - cv2.inRange(frame, (0, 0, 0), upper_bound)
-		aruco_dict = aruco.Dictionary_get(aruco.DICT_4X4_50)
-		arucoParameters = aruco.DetectorParameters_create()
-		corners, ids, rejectedImgPoints = aruco.detectMarkers(grey_frame, aruco_dict, parameters=arucoParameters)
-		threshold = (threshold + 1) % 256
-		if np.in1d(idsPresent, ids).all():
-			# if ids is not None:
-			# 	print(ids[:, 0])
-#		else:
-			frame = aruco.drawDetectedMarkers(frame, corners, ids)
-			ids = list(ids[:, 0])
-			#print(ids)
-			index = []
-			for _id in idsPresent:
-				index.append(ids.index(_id))
+def get_circle_corr():
+	i = 0
+	j = 0
+	f = 1
+	r = 200
+	rad = 0
+	initial_time = perf_counter()
+	two_pi = 2*3.14
+	centre = set_disp_mqtt_ctrl.frame_center
+	while 1:
+		if fps.ready():
+			print(f"\rFPS: {fps.get_fps()} | Ptime: {fps.get_ptime()} ms".ljust(65), end='')
+			fps.reset()
 
-			TL = [corners[index[0]][0][0][0],corners[index[0]][0][0][1]]
-			TR = [corners[index[1]][0][1][0],corners[index[1]][0][1][1]]
-			BR = [corners[index[2]][0][2][0],corners[index[2]][0][2][1]]
-			BL = [corners[index[3]][0][3][0],corners[index[3]][0][3][1]]
-			points = np.array([TL, TR, BR, BL], dtype="int32")
-			mat = [[min(points[:, 0]), max(points[:, 0])], [min(points[:, 1]), max(points[:, 1])]]
-		if mat:
-			frame = frame[mat[1][0] : mat[1][1], mat[0][0] : mat[0][1]]
-		cv2.imshow('table', frame)
-		key = cv2.waitKey(1) & 0xFF
-		if key == ord('q'):
-			break
-	cv2.destroyAllWindows()
-	return mat
+		if not (-two_pi < rad < two_pi):
+			initial_time = perf_counter()
+			rad = 0
+		else:
+			rad = two_pi*f*(perf_counter() - initial_time)
+		sleep(1/40)
+		# while i < 620:
+		# 	set_disp_mqtt_ctrl.ball_pose = (i, j), 25
+		# 	i = (i + 1)
+		# i = 0
+		# j = (j + 1)%448
+		set_disp_mqtt_ctrl.ball_pose = (int(centre[0] + r*np.cos(rad)), int(centre[1] + r*np.sin(rad))), 25
+
 
 if __name__ == '__main__':
 
 	# !!!!!!!!!!!!!!! Configs !!!!!!!!!!!!!!!!!
-	DEBUG = True
-	videoSrc = 0
-	showInterface = 1
-	numImageProcessors = 4
-
-	numNoBallFrames = 0
-	poolLock = threading.Lock()
-	idLock = threading.Lock()
+	DEBUG = False
+	show_interface = 1
 	fps = FPS()
+	if platform.system() == 'Windows':
+		Process(target=subprocess.run, args=[['py', 'plot_graph.py']]).start()
+	set_disp_mqtt_ctrl = SetDispMqttController()
 
-	cap = cv2.VideoCapture(videoSrc)
-	cap.set(3, 640)
-	cap.set(4, 480)
-	mat = findTable(cap, [0, 1, 2, 3])
-
-	xAxisPid = PID("x", Kp=1.70, Ki=0.08, Kd=1.26)
-	xAxisPid.output_limits = -750, 750
-
-	yAxisPid = PID("y", Kp=1.85, Ki=0.1, Kd=1.36)
-	yAxisPid.output_limits = -750, 750
-
-	xAxisPid.sample_time, yAxisPid.sample_time = 1/32, 1/32
-
-	done = 0
-	plotTerminate = Value('i', 0)
-	setpointPlot = Array('i', [0, 0])
-	ballPosePlot = Array('i', [0, 0])
-
-	servoCtrl = ServoController()
-	xAxisPid.error_map = yAxisPid.error_map = servoCtrl.errorMap
-
-	processorPool = [ImageProcessor(mat) for _ in range(numImageProcessors)]
-	setdispCtrl = SetDispController()
-	allThreads = processorPool[::-1]
-	if showInterface:
-		allThreads.insert(0, setdispCtrl)
-
-	isStarved = 'N'
-	try:
-		while cap.isOpened() and not done:
-			with poolLock:
-				if processorPool:
-					processor = processorPool.pop()
-				else:
-					processor = None
-			if processor:
-				ret, processor.frame = cap.read()
-				if not ret:
-					break
-				processor.id = perf_counter()
-				processor.event.set()
-				st_time = perf_counter()
-				fps.fpsUpdate()
-				if fps.ready():
-					print(f"\rFPS: {fps.getFPS()} | Ptime: {fps.getpTime()} ms | fDropped: {fps.droppedFrames}/{fps.avgFrames} | {isStarved}".ljust(65), end='')
-					fps.reset()
-					isStarved = 'N'
-			else:
-				# When the processorPool is isStarved, wait a while for it to refill
-				isStarved = 'Y'
-				sleep(0.01)
-	except KeyboardInterrupt:
-		pass
-
-	cap.release()
-	plotTerminate.value = 1
-	print()
-	servoCtrl.closeSerialPort()
-
-	for thread in allThreads:
-		thread.terminated = True
-		thread.join(2)
-		print(thread)
-	print(" Closed All ".center(50, '■'))
+	# set_disp_mqtt_ctrl.ball_pose = (0, 0), 25
+	# with open('animated_data.pkl', 'rb') as outp:
+	#     set_disp_mqtt_ctrl.animated = pickle.load(outp)
+	# threading.Thread(target=get_circle_corr, daemon=True).start()
+	set_disp_mqtt_ctrl.run()
+	print('\n')
+	print('EXITING'.center(50, '#'))
+	# with open('animated_data.pkl', 'wb') as outp:
+	#     pickle.dump(set_disp_mqtt_ctrl.animated, outp, pickle.HIGHEST_PROTOCOL)

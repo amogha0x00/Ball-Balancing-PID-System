@@ -219,16 +219,16 @@ class PID(object):
 		self._integral = self.clamp(self._integral)
 		self._last_output = self.clamp(self._last_output)
 
-	def reset(self, withI=True):
+	def reset(self, with_i=False):
 		"""
 		Reset the PID controller internals.
 		This sets each term to 0 as well as clearing the integral, the last output and the last
 		input (derivative calculation).
 		"""
 		self._proportional = 0
-		if withI:
-			self._integral = 0
 		self._derivative = 0
+		if with_i:
+			self._integral = 0
 
 		self._integral = self.clamp(self._integral)
 
