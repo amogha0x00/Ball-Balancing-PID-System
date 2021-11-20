@@ -130,7 +130,6 @@ class SetMqttController(threading.Thread):
 		self.start()
 
 	def run(self):
-		global done
 		while not (self.ball_pose or self.terminated):
 			sleep(0.01)
 
@@ -178,8 +177,9 @@ class SetMqttController(threading.Thread):
 		return x, y
 
 	def cmd_key_callback(self, client, userdata, msg):
-
+		global done
 		key = json.loads(msg.payload.decode('UTF-8'))
+
 		if key == 'q':
 			done = 1
 			self.terminated = 1
@@ -261,10 +261,9 @@ class ImageProcessor(threading.Thread):
 		self.stream = io.BytesIO()
 		self.event = threading.Event()
 		self.terminated = False
-		#self.mat = cv2.getPerspectiveTransform(np.float32([[0,0], [449,0], [449,449], [0,449]]), np.float32([[0,0], [449,0], [449,449], [0,449]]))
 		self.mat = mat
-		self.lower_limits = np.array([0, 0, 130])
-		self.upper_limits = np.array([255, 255, 255])
+		self.lower_limits = np.array([0, 140, 50])
+		self.upper_limits = np.array([32, 255, 255])
 		self.kernel_open = np.ones((5, 5))
 		self.kernel_close = np.ones((5, 5))
 		self.frame = None
@@ -328,7 +327,6 @@ class ImageProcessor(threading.Thread):
 		mask_open = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel_open)
 		mask_close = cv2.morphologyEx(mask_open, cv2.MORPH_CLOSE, self.kernel_close)
 		contours, _ = cv2.findContours(mask_close, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[-2:]
-		#self.frame = mask_close
 		if contours:
 			ball = max(contours, key = cv2.contourArea)
 			if cv2.contourArea(ball) <= 0:
@@ -337,13 +335,8 @@ class ImageProcessor(threading.Thread):
 			((x,y), radius) = cv2.minEnclosingCircle(ball)
 			if radius < 12 or radius > 60:
 				self.ball_pose = ()
-				#return False			
+				return False	
 			self.ball_pose = ((int(x), int(y)), int(radius))
-			#print(self.ball_pose)
-			#cv2.drawContours(self.frame, ball, -1, (255,255,255), 3)
-			#M = cv2.moments(ball)
-			#self.ball_pose = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
-			#print(self.ball_pose)
 			return True
 		self.ball_pose = ()#((320, 240),10)
 		return False
@@ -398,6 +391,7 @@ def find_table(ids_present):
 	stream = io.BytesIO()
 	global mat
 	threshold = 5
+	ids_points_dict = {}
 	while not done:
 		yield stream
 		stream.seek(0)
@@ -409,28 +403,31 @@ def find_table(ids_present):
 		arucoParameters = aruco.DetectorParameters_create()
 		corners, ids, rejectedImgPoints = aruco.detectMarkers(grey_frame, aruco_dict, parameters=arucoParameters)
 		threshold = (threshold + 1) % 256
-		if np.in1d(ids_present, ids).all():
-			frame = aruco.drawDetectedMarkers(frame, corners, ids)
+
+		if np.in1d(ids_present, ids).any():
 			ids = list(ids[:, 0])
-			index = []
-			for _id in ids_present:
-				index.append(ids.index(_id))
-			TL = [corners[index[0]][0][0][0], corners[index[0]][0][0][1]]
-			TR = [corners[index[1]][0][1][0], corners[index[1]][0][1][1]]
-			BR = [corners[index[2]][0][2][0], corners[index[2]][0][2][1]]
-			BL = [corners[index[3]][0][3][0], corners[index[3]][0][3][1]]
+			for index, _id in enumerate(ids):
+				if _id in ids_present:
+					corner = ids_present.index(_id)
+					ids_points_dict[_id] = [corners[index][0][corner][0], corners[index][0][corner][1]]
+			print('\r', ids_points_dict.keys(), end='')
+
+		if np.in1d(ids_present, tuple(ids_points_dict.keys())).all():
+			TL = ids_points_dict[ids_present[0]]
+			TR = ids_points_dict[ids_present[1]]
+			BR = ids_points_dict[ids_present[2]]
+			BL = ids_points_dict[ids_present[3]]
 			points = np.array([TL, TR, BR, BL], dtype="int32")
 			mat = ( ( min(points[:, 0]), max(points[:, 0]) ), ( min(points[:, 1]), max(points[:, 1]) ) )
-			frame = frame[mat[1][0] : mat[1][1], mat[0][0] : mat[0][1]]
 			set_mqtt_ctrl.frame_center = (frame.shape[1]//2, frame.shape[0]//2)
 			servo_ctrl.frame_center = set_mqtt_ctrl.frame_center
 			set_mqtt_ctrl.set_all_setpoints(set_mqtt_ctrl.frame_center)
 			break
-		else:
-			print(ids)
+			
 		stream.seek(0)
 		stream.truncate()
 
+	print('\n')
 	print(" FOUND TABLE ".center(50, '■'))
 
 

@@ -46,8 +46,9 @@ class SetDispMqttController:
 		# 	self.start()
 
 	def run(self):
-		while self.ball_pose == () and not self.terminated:
+		while not (self.ball_pose or self.terminated):
 			sleep(0.01)
+
 		if self.terminated:
 			return
 
