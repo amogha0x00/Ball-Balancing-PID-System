@@ -13,8 +13,8 @@ import subprocess
 import platform
 from iot import IOT
 import yaml
+import pickle
 # import traceback
-# import pickle
 
 class SetDispMqttController:
 	def __init__(self):
@@ -22,28 +22,23 @@ class SetDispMqttController:
 			broker_url = yaml.load(file_open, yaml.SafeLoader)['broker_url']
 		self.iot = IOT(broker_url=broker_url)
 
+		with open('ball_imgs.pkl', 'rb') as outp:
+			self.ball_imgs = pickle.load(outp)
+
 		self.lock = threading.Lock()
 		self.set_lock = threading.Lock()
 		self.table_img = cv2.imread("background.jpg", -1)
-		self.ball_img = cv2.imread("ball.jpg", -1)
 		self.return_img = np.array(self.table_img)
-		self.ball_height, self.ball_width = self.ball_img.shape[:2]
-		self.table_height, self.table_width = self.table_img.shape[:2]
-		self.ball_center = (self.ball_width//2, self.ball_height//2) 
+		self.table_height, self.table_width = self.table_img.shape[:2] 
 		self.frame_center = (self.table_width//2, self.table_height//2)
 		self._setpoint = ()
 		self._ball_pose = ()
 		self.graphShown = 0
 		self.terminated = 0
 		self.mode = 0
-		# self.animated = {}
-
 		self.setpoint = self.frame_center
-		
-		self.iot.mqtt_subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)
 
-		# if show_interface:
-		# 	self.start()
+		self.iot.mqtt_subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)
 
 	def run(self):
 		while not (self.ball_pose or self.terminated):
@@ -74,26 +69,30 @@ class SetDispMqttController:
 			cv2.setTrackbarPos('y_Kd(x100)', 'Processed Video Feed', int(y_Kd*100))
 
 		while not self.terminated:
-			ball_pose, radius = self.ball_pose
 			setpoint = self.setpoint
-			self.animate(ball_pose, radius)
+
+			if self.ball_pose:
+				ball_pose, radius = self.ball_pose
+				self.animate(ball_pose, radius)
+				# draw circle around the ball and arrowed line b/w ball and setpoint
+				cv2.circle(self.return_img, ball_pose, radius, (0, 255, 255), 2)
+				cv2.arrowedLine(self.return_img, ball_pose, setpoint, (0, 0, 255), 2)
+			else:
+				self.return_img = self.return_img = np.array(self.table_img)
+			
+			cv2.circle(self.return_img, setpoint, 4 ,(0, 255, 0), -1)
+
 			if self.mode == 1:
 				cv2.circle(self.return_img, self.frame_center, self.r ,(255,255,255),1)
 			elif self.mode == 2: # draw 8 mode
 				cv2.circle(self.return_img, (self.frame_center[0]-self.r, self.frame_center[1]), self.r ,(255,255,255),1)
 				cv2.circle(self.return_img, (self.frame_center[0]+self.r, self.frame_center[1]), self.r ,(255,255,255),1)
 
-			cv2.circle(self.return_img, setpoint, 4 ,(0, 255, 0), -1)
-
-			if ball_pose: # draw circle around the ball and arrowed line b/w ball and setpoint
-				cv2.circle(self.return_img, ball_pose, radius, (0, 255, 255), 2)
-				cv2.arrowedLine(self.return_img, ball_pose, setpoint, (0, 0, 255), 2)
-
 			cv2.imshow('Processed Video Feed', self.return_img)
 			key = chr(cv2.waitKey(1) & 0xFF)
 
 			if key in ['q', 'o', '8', 'r', 'f', '-', '+']:
-				threading.Thread(target=self.iot.mqtt_publish, args=('key_cmd', key, 2)).start()
+				threading.Thread(target=self.iot.mqtt_publish, args=('key_cmd', json.dumps(key), 2)).start()
 
 			if key == 'q':
 				self.terminated = 1
@@ -138,38 +137,33 @@ class SetDispMqttController:
 		cv2.destroyAllWindows()
 		cv2.waitKey(1)
 
-	def animate(self, ball_pose, radius=25):
+	def animate(self, ball_pose, radius=15):
 		st_time = perf_counter()
-		# frame = self.animated.get(str(ball_pose), None)
-		# if not (frame is None):
-		# 	self.return_img = np.array(frame)
-		# 	fps.ptime_update((perf_counter() - st_time)*1000)
-		# 	fps.fps_update()
-		# 	return
-
-		if not (radius == 25):
-			self.ball_img = cv2.resize(self.ball_img, dsize=(2*radius, 2*radius), interpolation=cv2.INTER_LINEAR)
-		# cv2.circle(self.return_img, ball_pose, radius ,(255,255,255),-1)
-		if (ball_pose[1] - self.ball_center[1] > -self.ball_height) and (ball_pose[1] + self.ball_center[1] < self.table_height + self.ball_height) and (ball_pose[0] - self.ball_center[0] > -self.ball_width) and (ball_pose[0] + self.ball_center[0] < self.table_width + self.ball_width): 
-			tmin_x, tmin_y, tmax_x, tmax_y = ball_pose[0] - self.ball_center[0], ball_pose[1] - self.ball_center[1], ball_pose[0] + self.ball_center[0], ball_pose[1] + self.ball_center[1]
-			bmin_x, bmin_y, bmax_x, bmax_y = 0, 0, self.ball_width, self.ball_height
+		ball_img = self.ball_imgs[radius]
+		ball_height, ball_width = ball_img.shape[:2]
+		ball_center = (ball_width//2, ball_height//2)
+		
+		if (ball_pose[1] - ball_center[1] > - ball_height) and (ball_pose[1] + ball_center[1] < self.table_height + ball_height) and (ball_pose[0] - ball_center[0] > - ball_width) and (ball_pose[0] + ball_center[0] < self.table_width + ball_width): 
+			tmin_x, tmin_y, tmax_x, tmax_y = ball_pose[0] - ball_center[0], ball_pose[1] - ball_center[1], ball_pose[0] + ball_center[0], ball_pose[1] + ball_center[1]
+			bmin_x, bmin_y, bmax_x, bmax_y = 0, 0, ball_width, ball_height
 			if tmin_x < 0:
 				bmin_x = abs(tmin_x)
 				tmin_x = 0
 			if tmax_x > self.table_width:
-				bmax_x = self.ball_width - (tmax_x - self.table_width)
+				bmax_x = ball_width - (tmax_x - self.table_width)
 				tmax_x = self.table_width
 			if tmin_y < 0:
 				bmin_y = abs(tmin_y)
 				tmin_y = 0
 			if tmax_y > self.table_height:
-				bmax_y = self.ball_height - (tmax_y - self.table_height)
+				bmax_y = ball_height - (tmax_y - self.table_height)
 				tmax_y = self.table_height
 
 			self.return_img = np.array(self.table_img)
 			return_img_roi = self.return_img[tmin_y:tmax_y, tmin_x:tmax_x]
-			cv2.add(return_img_roi, self.ball_img[bmin_y:bmax_y, bmin_x:bmax_x], dst=return_img_roi)
-			# self.animated[str(ball_pose)] = np.array(self.return_img)
+			cv2.add(return_img_roi, ball_img[bmin_y:bmax_y, bmin_x:bmax_x], dst=return_img_roi)
+		else:
+			self.return_img = np.array(self.table_img)
 
 		fps.ptime_update((perf_counter() - st_time)*1000)
 		fps.fps_update()
@@ -187,7 +181,6 @@ class SetDispMqttController:
 	def ball_pose(self, ball_pose):
 		with self.lock:
 			self._ball_pose = ball_pose
-		# ball_posePlot[:] = ball_pose[0]
 
 	def pose_callback(self, client, userdata, msg):
 		pose = json.loads(msg.payload.decode('UTF-8'))
@@ -203,8 +196,6 @@ class SetDispMqttController:
 	def setpoint(self, coordinate):
 		with self.set_lock:
 			self._setpoint = coordinate
-		# xAxisPid.setpoint, yAxisPid.setpoint = coordinate
-		# setpointPlot[:] = coordinate
 
 	def set_setpoint(self, event, x, y, flags, param):
 		if event == cv2.EVENT_LBUTTONDOWN:
@@ -292,11 +283,6 @@ def get_circle_corr():
 		else:
 			rad = two_pi*f*(perf_counter() - initial_time)
 		sleep(1/40)
-		# while i < 620:
-		# 	set_disp_mqtt_ctrl.ball_pose = (i, j), 25
-		# 	i = (i + 1)
-		# i = 0
-		# j = (j + 1)%448
 		set_disp_mqtt_ctrl.ball_pose = (int(centre[0] + r*np.cos(rad)), int(centre[1] + r*np.sin(rad))), 25
 
 
@@ -311,8 +297,6 @@ if __name__ == '__main__':
 	set_disp_mqtt_ctrl = SetDispMqttController()
 
 	# set_disp_mqtt_ctrl.ball_pose = (0, 0), 25
-	# with open('animated_data.pkl', 'rb') as outp:
-	#     set_disp_mqtt_ctrl.animated = pickle.load(outp)
 	# threading.Thread(target=get_circle_corr, daemon=True).start()
 	set_disp_mqtt_ctrl.run()
 	print('\n')

@@ -141,8 +141,8 @@ class SetMqttController(threading.Thread):
 			elif self.mode == 2: # draw 8 mode
 				self.set_all_setpoints(self.get_8_corr())
 
-			if ball_pose:
-				self.iot.mqtt_publish_reuse_client('ball_set_pose', json.dumps({"setpoint": self.setpoints, "ball_pose": ball_pose}), 0, 5)
+			# if ball_pose:
+			self.iot.mqtt_publish_reuse_client('ball_set_pose', json.dumps({"setpoint": self.setpoints, "ball_pose": ball_pose}), 0, 10)
 
 	def get_circle_corr(self, rad_offset=0, reset=False, xCenterOffset=0, yCenterOffset=0):
 

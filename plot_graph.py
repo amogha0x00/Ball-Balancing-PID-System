@@ -8,7 +8,9 @@ import yaml
 def callback(client, userdata, msg):
 	# print(json.loads(msg.payload.decode('UTF-8')))
 	pose = json.loads(msg.payload.decode('UTF-8'))
-	ball_pose_plot[:] = pose['ball_pose'][0]
+	ball_pose = pose['ball_pose']
+	if ball_pose:
+		ball_pose_plot[:] = ball_pose[0]
 	setpoint_plot[:] = pose['setpoint']
 
 if __name__ == '__main__':
