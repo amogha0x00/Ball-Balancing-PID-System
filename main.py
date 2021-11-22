@@ -39,6 +39,7 @@ class SetDispMqttController:
 		self.setpoint = self.frame_center
 
 		self.iot.mqtt_subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)
+		self.iot.mqtt_subscribe_thread_start(self.frame_size_callback, "frame_size", 2)
 
 	def run(self):
 		while not (self.ball_pose or self.terminated):
@@ -186,6 +187,17 @@ class SetDispMqttController:
 		pose = json.loads(msg.payload.decode('UTF-8'))
 		self.ball_pose = pose['ball_pose']
 		self.setpoint = pose['setpoint']
+
+	def frame_size_callback(self, client, userdata, msg):
+		size = json.loads(msg.payload.decode('UTF-8'))
+		print(f"Table Found, {size = }")
+		self.table_img = cv2.resize(self.table_img, dsize=size, interpolation=cv2.INTER_AREA)
+		self.return_img = np.array(self.table_img)
+		self.table_height, self.table_width = self.table_img.shape[:2] 
+		self.frame_center = (self.table_width//2, self.table_height//2)
+		client.loop_stop()
+		client.unsubscribe('frame_size')
+		client.disconnect()
 
 	@property
 	def setpoint(self):

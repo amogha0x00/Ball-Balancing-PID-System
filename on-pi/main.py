@@ -125,24 +125,29 @@ class SetMqttController(threading.Thread):
 		self.daemon = True
 
 		self.iot = IOT('localhost')
-		self.iot.mqtt_subscribe_thread_start(self.cmd_key_callback, "keyCmd", 2)
-		self.iot.mqtt_subscribe_thread_start(self.cmd_set_callback, "setPointCmd", 2)
+		self.iot.mqtt_subscribe_thread_start(self.cmd_key_callback, "key_cmd", 2)
+		self.iot.mqtt_subscribe_thread_start(self.cmd_set_callback, "setpoint_cmd", 2)
 		self.start()
 
 	def run(self):
 		while not (self.ball_pose or self.terminated):
 			sleep(0.01)
 
+		threading.Thread(target=self.setpoint_change_thread, args=(1/30,), daemon=True).start()
+
 		while not self.terminated:
 			ball_pose = self.ball_pose
 
+			# if ball_pose:
+			self.iot.mqtt_publish_reuse_client('ball_set_pose', json.dumps({"setpoint": self.setpoints, "ball_pose": ball_pose}), 0, None)
+
+	def setpoint_change_thread(self, secs):
+		while not self.terminated:
 			if self.mode == 1: # draw circle mode
 				self.set_all_setpoints(self.get_circle_corr())
 			elif self.mode == 2: # draw 8 mode
 				self.set_all_setpoints(self.get_8_corr())
-
-			# if ball_pose:
-			self.iot.mqtt_publish_reuse_client('ball_set_pose', json.dumps({"setpoint": self.setpoints, "ball_pose": ball_pose}), 0, 10)
+			sleep(secs)
 
 	def get_circle_corr(self, rad_offset=0, reset=False, xCenterOffset=0, yCenterOffset=0):
 
@@ -418,8 +423,14 @@ def find_table(ids_present):
 			BR = ids_points_dict[ids_present[2]]
 			BL = ids_points_dict[ids_present[3]]
 			points = np.array([TL, TR, BR, BL], dtype="int32")
+
 			mat = ( ( min(points[:, 0]), max(points[:, 0]) ), ( min(points[:, 1]), max(points[:, 1]) ) )
-			set_mqtt_ctrl.frame_center = (frame.shape[1]//2, frame.shape[0]//2)
+			frame = frame[mat[1][0] : mat[1][1], mat[0][0] : mat[0][1]]
+
+			frame_size = frame.shape[1], frame.shape[0]
+			set_mqtt_ctrl.frame_center = frame_size[0]//2, frame_size[1]//2
+			set_mqtt_ctrl.iot.mqtt_publish('frame_size', json.dumps(frame_size), 2)
+
 			servo_ctrl.frame_center = set_mqtt_ctrl.frame_center
 			set_mqtt_ctrl.set_all_setpoints(set_mqtt_ctrl.frame_center)
 			break
