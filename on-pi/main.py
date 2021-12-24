@@ -43,7 +43,7 @@ class ServoController:
 		self.ball_pose = ()
 
 		try:
-			self.arduino = serial.Serial(port='COM3', baudrate=115200, write_timeout=0.01)
+			self.arduino = serial.Serial(port='/dev/ttyACM0', baudrate=115200, write_timeout=0.01)
 			self.arduino_connected = True
 		except serial.SerialException:
 			print(" Unable to Open Serial Port ".center(50, '■'), end='\n\n')
@@ -120,20 +120,20 @@ class SetMqttController(threading.Thread):
 		self.graphShown = 0
 		self.rad = 0
 		self.frame_center = ()
+		self.frame_size = ()
 		self._setpoints = (320, 240)
 		self.terminated = 0
 		self.daemon = True
 
 		self.iot = IOT('localhost')
 		self.iot.mqtt_subscribe_thread_start(self.cmd_key_callback, "key_cmd", 2)
-		self.iot.mqtt_subscribe_thread_start(self.cmd_set_callback, "setpoint_cmd", 2)
 		self.start()
 
 	def run(self):
 		while not (self.ball_pose or self.terminated):
 			sleep(0.01)
 
-		threading.Thread(target=self.setpoint_change_thread, args=(1/30,), daemon=True).start()
+		threading.Thread(target=self.setpoint_change_thread, args=(1/15,), daemon=True).start()
 
 		while not self.terminated:
 			ball_pose = self.ball_pose
@@ -188,6 +188,8 @@ class SetMqttController(threading.Thread):
 		if key == 'q':
 			done = 1
 			self.terminated = 1
+		elif key == 'frame_size':
+			threading.Thread(target=set_mqtt_ctrl.iot.mqtt_publish, args=('frame_size', json.dumps(self.frame_size), 2)).start()
 		elif key == 'o':
 			self.mode = 1
 			self.r = 100
@@ -196,6 +198,13 @@ class SetMqttController(threading.Thread):
 			self.mode = 2
 			self.r = 90
 			self.set_all_setpoints(self.get_8_corr(reset=True))
+		elif key[0] == 'S':
+			self.mode = 0
+			self.set_all_setpoints(tuple(json.loads(key[1:])))
+		elif key[0] == 'T':
+			parameter = key[1:5]
+			pos = int(key[5:])
+			self.set_tuning(pos, parameter)
 		elif key == 'r':
 			self.mode = 0
 			self.set_all_setpoints(self.frame_center)
@@ -212,10 +221,6 @@ class SetMqttController(threading.Thread):
 					self.f += 0.1
 				else:
 					self.f -= 0.1
-
-	def cmd_set_callback(self, client, userdata, msg):
-		setpoints = json.loads(msg.payload.decode('UTF-8'))
-		self.set_all_setpoints(setpoints)
 
 	@property
 	def ball_pose(self):
@@ -338,7 +343,7 @@ class ImageProcessor(threading.Thread):
 				self.ball_pose = ()
 				return False
 			((x,y), radius) = cv2.minEnclosingCircle(ball)
-			if radius < 12 or radius > 60:
+			if radius < 5 or radius > 40:
 				self.ball_pose = ()
 				return False	
 			self.ball_pose = ((int(x), int(y)), int(radius))
@@ -428,8 +433,9 @@ def find_table(ids_present):
 			frame = frame[mat[1][0] : mat[1][1], mat[0][0] : mat[0][1]]
 
 			frame_size = frame.shape[1], frame.shape[0]
+			set_mqtt_ctrl.frame_size = frame_size
 			set_mqtt_ctrl.frame_center = frame_size[0]//2, frame_size[1]//2
-			set_mqtt_ctrl.iot.mqtt_publish('frame_size', json.dumps(frame_size), 2)
+			#set_mqtt_ctrl.iot.mqtt_publish('frame_size', json.dumps(frame_size), 2)
 
 			servo_ctrl.frame_center = set_mqtt_ctrl.frame_center
 			set_mqtt_ctrl.set_all_setpoints(set_mqtt_ctrl.frame_center)
@@ -438,8 +444,7 @@ def find_table(ids_present):
 		stream.seek(0)
 		stream.truncate()
 
-	print('\n')
-	print(" FOUND TABLE ".center(50, '■'))
+	print("\nFOUND TABLE ".center(50, '■'))
 
 
 def streams():
@@ -501,7 +506,7 @@ if __name__ == '__main__':
 	set_mqtt_ctrl = SetMqttController()
 
 	with picamera.PiCamera() as camera:
-		camera.resolution = (640, 360)
+		camera.resolution = (640, 480)
 		camera.framerate = 90
 		sleep(2)
 		# Now fix the values

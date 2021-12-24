@@ -40,6 +40,7 @@ class SetDispMqttController:
 
 		self.iot.mqtt_subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)
 		self.iot.mqtt_subscribe_thread_start(self.frame_size_callback, "frame_size", 2)
+		self.iot.mqtt_publish("key_cmd", json.dumps("frame_size"), 2)
 
 	def run(self):
 		while not (self.ball_pose or self.terminated):
@@ -93,47 +94,19 @@ class SetDispMqttController:
 			key = chr(cv2.waitKey(1) & 0xFF)
 
 			if key in ['q', 'o', '8', 'r', 'f', '-', '+']:
-				threading.Thread(target=self.iot.mqtt_publish, args=('key_cmd', json.dumps(key), 2)).start()
+				threading.Thread(target=self.iot.mqtt_publish_reuse_client, args=('key_cmd', json.dumps(key), 2)).start()
 
 			if key == 'q':
 				self.terminated = 1
-				# plotTerminate.value = 1
 			elif key == 'o':
 				self.mode = 1
 				self.r = 100
-				# self.setpoint(self.get_circle_corr(reset=True))
 			elif key == '8':
 				self.mode = 2
 				self.r = 90
-				# self.setpoint(self.get8Corr(reset=True))
 			elif key == 'r':
 				self.mode = 0
 				self.setpoint = self.frame_center
-			# elif key == 'g':
-			# 	if self.graphShown:
-			# 		plotTerminate.value = 1
-			# 		self.graphShown = 0
-			# 	else:
-			# 		self.graphShown = 1
-			# 		plotTerminate.value = 0
-			# 		args = (setpointPlot, ball_posePlot, plotTerminate)
-			# 		kwargs = {'identifier': 'GRAPH', 'maxLimit': (max(width, height)) + 50}
-			# 		Process(target=plotGraph, args=args, kwargs=kwargs).start()
-
-			# elif key == 'f':
-			# 	self.f *= -1
-			# 	pass
-			# elif key == '-'):
-		# 	if self.f >= 0:
-			# 		self.f -= 0.1
-			# 	else:
-			# 		self.f += 0.1
-			# elif key == '+'):
-		# 	if -3 < self.f < 3:
-			# 		if self.f >= 0:
-			# 			self.f += 0.1
-			# 		else:
-			# 			self.f -= 0.1
 
 		cv2.destroyAllWindows()
 		cv2.waitKey(1)
@@ -190,6 +163,10 @@ class SetDispMqttController:
 
 	def frame_size_callback(self, client, userdata, msg):
 		size = json.loads(msg.payload.decode('UTF-8'))
+		if size == []:
+			sleep(1)
+			self.iot.mqtt_publish("key_cmd", json.dumps("frame_size"), 2)
+			return
 		print(f"Table Found, {size = }")
 		self.table_img = cv2.resize(self.table_img, dsize=size, interpolation=cv2.INTER_AREA)
 		self.return_img = np.array(self.table_img)
@@ -212,22 +189,11 @@ class SetDispMqttController:
 	def set_setpoint(self, event, x, y, flags, param):
 		if event == cv2.EVENT_LBUTTONDOWN:
 			self.mode = 0
-			self.setpoint = [x, y]
+			threading.Thread(target=self.iot.mqtt_publish_reuse_client, args=('key_cmd', json.dumps(f"S[{x}, {y}]"), 2)).start()
+
 
 	def set_tuning(self, pos, parameter):
-		pass
-		# if parameter == "x_Kp":
-		# 	xAxisPid.Kp = pos
-		# elif parameter == "y_Kp":
-		# 	yAxisPid.Kp = pos
-		# elif parameter == "x_Ki":
-		# 	xAxisPid.Ki = pos
-		# elif parameter == "y_Ki":
-		# 	yAxisPid.Ki = pos
-		# elif parameter == "x_Kd":
-		# 	xAxisPid.Kd = pos
-		# elif parameter == "y_Kd":
-		# 	yAxisPid.Kd = pos
+		threading.Thread(target=self.iot.mqtt_publish_reuse_client, args=('key_cmd', json.dumps(f"T{parameter}{pos}"), 2)).start()
 
 
 class FPS():
