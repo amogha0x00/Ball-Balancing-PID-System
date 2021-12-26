@@ -3,6 +3,7 @@
 """
 	Author : Amoghavarsha S G
 """
+
 import cv2
 import numpy as np
 import threading
@@ -38,26 +39,16 @@ class SetDispMqttController:
 		self.mode = 0
 		self.setpoint = self.frame_center
 
-		self.iot.mqtt_subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)
-		self.iot.mqtt_subscribe_thread_start(self.frame_size_callback, "frame_size", 2)
-		self.iot.mqtt_publish("key_cmd", json.dumps("frame_size"), 2)
-
 	def run(self):
-		while not (self.ball_pose or self.terminated):
-			sleep(0.01)
-
-		if self.terminated:
-			return
-
 		cv2.namedWindow('Processed Video Feed', cv2.WINDOW_NORMAL)
-		height, width = self.return_img.shape[:2]
-		cv2.resizeWindow('Processed Video Feed', int(width*1.1), int(height*1.1))
+		cv2.resizeWindow('Processed Video Feed', int(self.table_width*1.1), int(self.table_height*1.1))
 		cv2.setMouseCallback('Processed Video Feed', self.set_setpoint)
+
 		if DEBUG:
 			cv2.createTrackbar('x_Kp(x100)', 'Processed Video Feed', 0, 500, lambda x: self.set_tuning(x/100, "x_Kp"))
 			cv2.createTrackbar('x_Ki(x100)', 'Processed Video Feed', 0, 100, lambda x: self.set_tuning(x/100, "x_Ki"))
 			cv2.createTrackbar('x_Kd(x100)', 'Processed Video Feed', 0, 1500, lambda x: self.set_tuning(x/100, "x_Kd"))
-			x_Kp, x_Ki, x_Kd = 1, 0, 0 #xAxisPid.tunings
+			x_Kp, x_Ki, x_Kd = 1.70, 0.08, 1.26 #xAxisPid.tunings
 			cv2.setTrackbarPos('x_Kp(x100)', 'Processed Video Feed', int(x_Kp*100))
 			cv2.setTrackbarPos('x_Ki(x100)', 'Processed Video Feed', int(x_Ki*100))
 			cv2.setTrackbarPos('x_Kd(x100)', 'Processed Video Feed', int(x_Kd*100))
@@ -65,10 +56,14 @@ class SetDispMqttController:
 			cv2.createTrackbar('y_Kp(x100)', 'Processed Video Feed', 0, 500, lambda x: self.set_tuning(x/100, "y_Kp"))
 			cv2.createTrackbar('y_Ki(x100)', 'Processed Video Feed', 0, 100, lambda x: self.set_tuning(x/100, "y_Ki"))
 			cv2.createTrackbar('y_Kd(x100)', 'Processed Video Feed', 0, 1500, lambda x: self.set_tuning(x/100, "y_Kd"))
-			y_Kp, y_Ki, y_Kd = 1, 0, 0#yAxisPid.tunings
+			y_Kp, y_Ki, y_Kd = 1.85, 0.1, 1.36 #yAxisPid.tunings
 			cv2.setTrackbarPos('y_Kp(x100)', 'Processed Video Feed', int(y_Kp*100))
 			cv2.setTrackbarPos('y_Ki(x100)', 'Processed Video Feed', int(y_Ki*100))
 			cv2.setTrackbarPos('y_Kd(x100)', 'Processed Video Feed', int(y_Kd*100))
+
+		self.iot.mqtt_subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)		
+		self.iot.mqtt_subscribe_thread_start(self.frame_size_callback, "frame_size", 2)
+		self.iot.mqtt_publish("key_cmd", json.dumps("frame_size"), 2)
 
 		while not self.terminated:
 			setpoint = self.setpoint
@@ -80,7 +75,7 @@ class SetDispMqttController:
 				cv2.circle(self.return_img, ball_pose, radius, (0, 255, 255), 2)
 				cv2.arrowedLine(self.return_img, ball_pose, setpoint, (0, 0, 255), 2)
 			else:
-				self.return_img = self.return_img = np.array(self.table_img)
+				self.return_img = np.array(self.table_img)
 			
 			cv2.circle(self.return_img, setpoint, 4 ,(0, 255, 0), -1)
 
@@ -94,7 +89,7 @@ class SetDispMqttController:
 			key = chr(cv2.waitKey(1) & 0xFF)
 
 			if key in ['q', 'o', '8', 'r', 'f', '-', '+']:
-				threading.Thread(target=self.iot.mqtt_publish_reuse_client, args=('key_cmd', json.dumps(key), 2)).start()
+				self.iot.mqtt_publish_reuse_client('key_cmd', json.dumps(key), 2)
 
 			if key == 'q':
 				self.terminated = 1
@@ -167,14 +162,16 @@ class SetDispMqttController:
 			sleep(1)
 			self.iot.mqtt_publish("key_cmd", json.dumps("frame_size"), 2)
 			return
-		print(f"Table Found, {size = }")
-		self.table_img = cv2.resize(self.table_img, dsize=size, interpolation=cv2.INTER_AREA)
-		self.return_img = np.array(self.table_img)
-		self.table_height, self.table_width = self.table_img.shape[:2] 
-		self.frame_center = (self.table_width//2, self.table_height//2)
 		client.loop_stop()
 		client.unsubscribe('frame_size')
 		client.disconnect()
+
+		print(f"Table Found, {size = }")
+		self.table_img = cv2.resize(self.table_img, dsize=size, interpolation=cv2.INTER_AREA)
+		self.table_width, self.table_height = size 
+		self.return_img = np.array(self.table_img)
+		cv2.resizeWindow('Processed Video Feed', int(self.table_width*1.1), int(self.table_height*1.1))
+		self.frame_center = (self.table_width//2, self.table_height//2)
 
 	@property
 	def setpoint(self):
@@ -241,33 +238,11 @@ class FPS():
 		self.n_frames = 0
 		self.initial_time = perf_counter()
 
-def get_circle_corr():
-	i = 0
-	j = 0
-	f = 1
-	r = 200
-	rad = 0
-	initial_time = perf_counter()
-	two_pi = 2*3.14
-	centre = set_disp_mqtt_ctrl.frame_center
-	while 1:
-		if fps.ready():
-			print(f"\rFPS: {fps.get_fps()} | Ptime: {fps.get_ptime()} ms".ljust(65), end='')
-			fps.reset()
-
-		if not (-two_pi < rad < two_pi):
-			initial_time = perf_counter()
-			rad = 0
-		else:
-			rad = two_pi*f*(perf_counter() - initial_time)
-		sleep(1/40)
-		set_disp_mqtt_ctrl.ball_pose = (int(centre[0] + r*np.cos(rad)), int(centre[1] + r*np.sin(rad))), 25
-
 
 if __name__ == '__main__':
 
 	# !!!!!!!!!!!!!!! Configs !!!!!!!!!!!!!!!!!
-	DEBUG = False
+	DEBUG = True
 	show_interface = 1
 	fps = FPS()
 	if platform.system() == 'Windows':

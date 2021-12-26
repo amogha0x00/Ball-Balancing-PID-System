@@ -1,3 +1,7 @@
+"""
+	Author : Amoghavarsha S G
+"""
+
 from graph_plotter import qt_plotter
 from multiprocessing import Process, Array, Value
 from time import sleep

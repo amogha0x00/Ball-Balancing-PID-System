@@ -43,7 +43,7 @@ class ServoController:
 		self.ball_pose = ()
 
 		try:
-			self.arduino = serial.Serial(port='/dev/ttyACM0', baudrate=115200, write_timeout=0.01)
+			self.arduino = serial.Serial(port='/dev/ttyACM0', baudrate=115200, write_timeout=0.03)
 			self.arduino_connected = True
 		except serial.SerialException:
 			print(" Unable to Open Serial Port ".center(50, '■'), end='\n\n')
@@ -103,6 +103,7 @@ class ServoController:
 	def close_serial_port(self):
 		if self.arduino_connected:
 			self.arduino.close()
+			print('\n')
 			print(" Closed Serial Port ".center(50, '■'))
 
 
@@ -130,15 +131,9 @@ class SetMqttController(threading.Thread):
 		self.start()
 
 	def run(self):
-		while not (self.ball_pose or self.terminated):
-			sleep(0.01)
-
 		threading.Thread(target=self.setpoint_change_thread, args=(1/15,), daemon=True).start()
-
 		while not self.terminated:
 			ball_pose = self.ball_pose
-
-			# if ball_pose:
 			self.iot.mqtt_publish_reuse_client('ball_set_pose', json.dumps({"setpoint": self.setpoints, "ball_pose": ball_pose}), 0, None)
 
 	def setpoint_change_thread(self, secs):
@@ -203,7 +198,7 @@ class SetMqttController(threading.Thread):
 			self.set_all_setpoints(tuple(json.loads(key[1:])))
 		elif key[0] == 'T':
 			parameter = key[1:5]
-			pos = int(key[5:])
+			pos = float(key[5:])
 			self.set_tuning(pos, parameter)
 		elif key == 'r':
 			self.mode = 0
@@ -243,17 +238,17 @@ class SetMqttController(threading.Thread):
 			self._ball_pose = ball_pose
 
 	def set_tuning(self, pos, parameter):
-		if parameter == "xKp":
+		if parameter == "x_Kp":
 			x_axis_pid.Kp = pos
-		elif parameter == "yKp":
+		elif parameter == "y_Kp":
 			y_axis_pid.Kp = pos
-		elif parameter == "xKi":
+		elif parameter == "x_Ki":
 			x_axis_pid.Ki = pos
-		elif parameter == "yKi":
+		elif parameter == "y_Ki":
 			y_axis_pid.Ki = pos
-		elif parameter == "xKd":
+		elif parameter == "x_Kd":
 			x_axis_pid.Kd = pos
-		elif parameter == "yKd":
+		elif parameter == "y_Kd":
 			y_axis_pid.Kd = pos
 
 	def check_id(self, current_id):
@@ -435,7 +430,7 @@ def find_table(ids_present):
 			frame_size = frame.shape[1], frame.shape[0]
 			set_mqtt_ctrl.frame_size = frame_size
 			set_mqtt_ctrl.frame_center = frame_size[0]//2, frame_size[1]//2
-			#set_mqtt_ctrl.iot.mqtt_publish('frame_size', json.dumps(frame_size), 2)
+			set_mqtt_ctrl.iot.mqtt_publish('frame_size', json.dumps(frame_size), 2)
 
 			servo_ctrl.frame_center = set_mqtt_ctrl.frame_center
 			set_mqtt_ctrl.set_all_setpoints(set_mqtt_ctrl.frame_center)
@@ -444,7 +439,8 @@ def find_table(ids_present):
 		stream.seek(0)
 		stream.truncate()
 
-	print("\nFOUND TABLE ".center(50, '■'))
+	print('\n')
+	print(" FOUND TABLE ".center(50, '■'))
 
 
 def streams():
@@ -496,7 +492,7 @@ if __name__ == '__main__':
 	y_axis_pid = PID("y", Kp=1.85, Ki=0.1, Kd=1.36)
 	y_axis_pid.output_limits = -750, 750
 
-	x_axis_pid.sample_time, y_axis_pid.sample_time = 1/32, 1/32
+	x_axis_pid.sample_time, y_axis_pid.sample_time = 1/33, 1/33
 
 	servo_ctrl = ServoController()
 	
