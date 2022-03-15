@@ -316,7 +316,7 @@ class ImageProcessor(threading.Thread):
 			((x,y), radius) = cv2.minEnclosingCircle(ball)
 			if radius < 5 or radius > 40:
 				self.ball_pose = ()
-				return False	
+				return False
 			self.ball_pose = ((int(x), int(y)), int(radius))
 			return True
 		self.ball_pose = ()
@@ -446,7 +446,7 @@ def streams():
 				times_starved = 0
 
 		except KeyboardInterrupt:
-			print ("Ctrl-c pressed ...")
+			print("Ctrl-c pressed ...")
 			done = 1
 
 if __name__ == '__main__':
@@ -483,11 +483,11 @@ if __name__ == '__main__':
 		camera.framerate = 90
 		sleep(2)
 		camera.capture_sequence(find_table([0, 1, 2, 3]), use_video_port=True)
+		sleep(2)
 		processor_pool = [ImageProcessor(mat) for _ in range(num_image_processors)]
 		all_threads = processor_pool[::-1]
 		if use_mqtt:
 			all_threads.insert(0, set_mqtt_ctrl)
-		sleep(2)
 		camera.capture_sequence(streams(), use_video_port=True)
 
 
