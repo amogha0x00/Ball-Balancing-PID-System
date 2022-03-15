@@ -39,7 +39,6 @@ class ServoController:
 		self.y_offsetAngle = self.angle_map(y_offset)
 		self.x_plate_angle = 0
 		self.y_plate_angle = 0
-		self.frame_center = ()
 		self.ball_pose = ()
 
 		try:
@@ -66,33 +65,12 @@ class ServoController:
 		self.y_plate_angle = math.asin(y_displacement/self.plate_piviot_len)
 
 	def error_map(self, error, axis):
-		if not self.frame_center:
-			return error
+		#print(self.x_plate_angle*180/math.pi, self.y_plate_angle*180/math.pi, error, axis)
+
 		if axis == "x":
-			r_error = self.frame_center[0] - self.ball_pose[0] 
-			r_plate_angle = self.y_plate_angle
-			other_error = abs((self.frame_center[1] - self.ball_pose[1])*math.sin(self.y_plate_angle))/self.camera_distance
-			own_error = error/math.cos(self.x_plate_angle)
-		else:
-			r_error = self.frame_center[1] - self.ball_pose[1]
-			r_plate_angle = self.x_plate_angle
-			other_error = abs((self.frame_center[0] - self.ball_pose[0])*math.sin(self.x_plate_angle))/self.camera_distance
-			own_error = error/math.cos(self.y_plate_angle)
-		if error == 0:
-			return error
-		if r_plate_angle > 0:
-			if r_error > 0:
-				error_ = own_error #+ ((error/abs(error)) * other_error)
-			else:
-				error_ = own_error #+  ((error/abs(error)) * - other_error)
-		else:
-			if r_error > 0:
-				error_ = own_error #+  ((error/abs(error)) * - other_error)
-			else:
-				error_ = own_error #+ ((error/abs(error)) * other_error)
-		
-		#print(self.x_plate_angle*180/math.pi, self.y_plate_angle*180/math.pi, error, error_, axis)
-		return error_
+			return error/math.cos(self.x_plate_angle)
+		return error/math.cos(self.y_plate_angle)
+
 
 	@staticmethod
 	def angle_map(val):
@@ -286,8 +264,6 @@ class ImageProcessor(threading.Thread):
 					self.frame = cv2.imdecode(np.frombuffer(self.stream.read(), np.uint8), cv2.IMREAD_COLOR)
 					if self.mat:
 						self.frame = self.frame[self.mat[1][0] : self.mat[1][1], self.mat[0][0] : self.mat[0][1]]
-					#cv2.imwrite('im.jpg', self.frame)
-					#print(self.frame)
 					self.findBall()
 					with id_lock:
 						if set_mqtt_ctrl.check_id(self.id):
@@ -343,7 +319,7 @@ class ImageProcessor(threading.Thread):
 				return False	
 			self.ball_pose = ((int(x), int(y)), int(radius))
 			return True
-		self.ball_pose = ()#((320, 240),10)
+		self.ball_pose = ()
 		return False
 
 
@@ -370,7 +346,7 @@ class FPS():
 
 	def get_pTime(self):
 		with self.plock:
-			return round(sum(self.ptime_vals)/len(self.ptime_vals), 4), round(max(self.ptime_vals), 4)
+			return round(sum(self.ptime_vals)/len(self.ptime_vals), 3), round(max(self.ptime_vals), 3)
 
 	def ready(self):
 		return self.n_frames >= self.avg_frames
@@ -432,10 +408,9 @@ def find_table(ids_present):
 			set_mqtt_ctrl.frame_center = frame_size[0]//2, frame_size[1]//2
 			set_mqtt_ctrl.iot.mqtt_publish('frame_size', json.dumps(frame_size), 2)
 
-			servo_ctrl.frame_center = set_mqtt_ctrl.frame_center
 			set_mqtt_ctrl.set_all_setpoints(set_mqtt_ctrl.frame_center)
 			break
-			
+
 		stream.seek(0)
 		stream.truncate()
 
@@ -445,7 +420,7 @@ def find_table(ids_present):
 
 def streams():
 	global done
-	is_starved = 'N'
+	times_starved = 0
 	while not done:
 		try:
 			with pool_lock:
@@ -457,16 +432,18 @@ def streams():
 				yield processor.stream
 				processor.id = perf_counter()
 				processor.event.set()
+				fps.fps_update()
 			else:
 				# When the pool is starved, wait a while for it to refill
 				#print("pool is starved")
-				is_starved = 'Y'
 				sleep(0.02)
-			fps.fps_update()
+				times_starved += 1
 			if fps.ready():
-				print(f"\rFPS: {fps.get_fps()} | Ptime: {fps.get_pTime()} ms | fDropped: {fps.dropped_frames}/{fps.avg_frames} | {is_starved}".ljust(65), end='')
+				curr_fps = fps.get_fps()
+				fDropped = int((fps.dropped_frames/fps.avg_frames)*curr_fps)
+				print(f"\rFPS: {curr_fps} | Ptime: {fps.get_pTime()} ms | fDropped: {fDropped}/{curr_fps} | {times_starved}".ljust(65), end='')
 				fps.reset()
-				is_starved = 'N'
+				times_starved = 0
 
 		except KeyboardInterrupt:
 			print ("Ctrl-c pressed ...")
@@ -478,7 +455,7 @@ if __name__ == '__main__':
 	DEBUG = True
 	video_src = 0
 	use_mqtt = 1
-	num_image_processors = 4
+	num_image_processors = 6
 	done = 0
 
 	num_no_ball_frames = 0
@@ -505,13 +482,6 @@ if __name__ == '__main__':
 		camera.resolution = (640, 480)
 		camera.framerate = 90
 		sleep(2)
-		# Now fix the values
-		#camera.shutter_speed = 2720 #int(camera.exposure_speed/4)
-		#print(str(camera.shutter_speed))
-		#camera.exposure_mode = 'off'
-		#g = camera.awb_gains
-		#camera.awb_mode = 'off'
-		#camera.awb_gains = g
 		camera.capture_sequence(find_table([0, 1, 2, 3]), use_video_port=True)
 		processor_pool = [ImageProcessor(mat) for _ in range(num_image_processors)]
 		all_threads = processor_pool[::-1]
