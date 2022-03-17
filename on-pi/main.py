@@ -237,6 +237,7 @@ class SetMqttController(threading.Thread):
 
 
 class ImageProcessor(threading.Thread):
+	num_no_ball_frames = 0
 	def __init__(self, mat):
 		super().__init__()
 		self.id = perf_counter()
@@ -255,7 +256,6 @@ class ImageProcessor(threading.Thread):
 
 	def run(self):
 		# This method runs in a separate thread
-		global num_no_ball_frames
 		while not self.terminated:
 			# Wait for an image to be written to the stream
 			if self.event.wait(1):
@@ -272,15 +272,15 @@ class ImageProcessor(threading.Thread):
 								x_pid = x_axis_pid(self.ball_pose[0][0])
 								y_pid = y_axis_pid(self.ball_pose[0][1])
 								servo_ctrl.send_arduino(x_pid, y_pid)
-								num_no_ball_frames = 0
+								ImageProcessor.num_no_ball_frames = 0
 							else:
-								if num_no_ball_frames >=90: # if Ball is not there for more than 90 frames make plate flat
+								if ImageProcessor.num_no_ball_frames >=90: # if Ball is not there for more than 90 frames make plate flat
 									servo_ctrl.send_arduino(0, 0)
-									num_no_ball_frames = 0
+									ImageProcessor.num_no_ball_frames = 0
 									x_axis_pid.reset()
 									y_axis_pid.reset()
 								else:
-									num_no_ball_frames +=1
+									ImageProcessor.num_no_ball_frames +=1
 							set_mqtt_ctrl.ball_pose = self.ball_pose
 						else:
 							fps.dropped_frames += 1
@@ -458,7 +458,6 @@ if __name__ == '__main__':
 	num_image_processors = 6
 	done = 0
 
-	num_no_ball_frames = 0
 	pool_lock = threading.Lock()
 	id_lock = threading.Lock()
 	fps = FPS()
