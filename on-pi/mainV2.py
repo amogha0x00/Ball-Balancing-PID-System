@@ -88,8 +88,10 @@ class ServoController:
 class SetMqttController(threading.Thread):
 	def __init__(self):
 		super().__init__()
-		self.lock = threading.Lock()
+		self.ball_lock = threading.Lock()
 		self.set_lock = threading.Lock()
+		self.pid_lock = threading.Lock()
+
 		self._ball_pose = ()
 		self.last_id = -1
 		self.mode = 0
@@ -101,6 +103,7 @@ class SetMqttController(threading.Thread):
 		self.frame_center = ()
 		self.frame_size = ()
 		self._setpoints = (320, 240)
+		self._pid_values = ()
 		self.terminated = 0
 		self.daemon = True
 
@@ -112,7 +115,7 @@ class SetMqttController(threading.Thread):
 		threading.Thread(target=self.setpoint_change_thread, args=(1/15,), daemon=True).start()
 		while not self.terminated:
 			ball_pose = self.ball_pose
-			self.iot.mqtt_publish_reuse_client('ball_set_pose', json.dumps({"setpoint": self.setpoints, "ball_pose": ball_pose}), 0, None)
+			self.iot.mqtt_publish_reuse_client('ball_set_pose', json.dumps({"setpoint": self.setpoints, "ball_pose": ball_pose, "pid_values": self.pid_values}), 0, None)
 
 	def setpoint_change_thread(self, secs):
 		while not self.terminated:
@@ -197,13 +200,23 @@ class SetMqttController(threading.Thread):
 
 	@property
 	def ball_pose(self):
-		with self.lock:
+		with self.ball_lock:
 			return self._ball_pose
 
 	@property
 	def setpoints(self):
 		with self.set_lock:
 			return self._setpoints
+
+	@property
+	def pid_values(self):
+		with self.pid_lock:
+			return self._pid_values
+
+	@pid_values.setter
+	def pid_values(self, pid):
+		with self.pid_lock:
+			self._pid_values = pid
 
 	def set_all_setpoints(self, coordinate):
 		with self.set_lock:
@@ -212,7 +225,7 @@ class SetMqttController(threading.Thread):
 
 	@ball_pose.setter
 	def ball_pose(self, ball_pose):
-		with self.lock:
+		with self.ball_lock:
 			self._ball_pose = ball_pose
 
 	def set_tuning(self, pos, parameter):
@@ -274,6 +287,7 @@ class ImageProcessor(threading.Thread):
 								y_pid = y_axis_pid(self.ball_pose[0][1])
 								servo_ctrl.send_arduino(x_pid, y_pid)
 								ImageProcessor.num_no_ball_frames = 0
+								set_mqtt_ctrl.pid_values = (x_pid, y_pid)
 							else:
 								if ImageProcessor.num_no_ball_frames >=90: # if Ball is not there for more than 90 frames make plate flat
 									servo_ctrl.send_arduino(0, 0)

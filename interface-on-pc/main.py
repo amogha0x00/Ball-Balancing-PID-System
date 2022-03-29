@@ -214,7 +214,7 @@ class FPS():
 
 	def get_ptime(self):
 		with self.plock:
-			return round(sum(self.ptime_vals)/len(self.ptime_vals), 4), round(max(self.ptime_vals), 4)
+			return round(sum(self.ptime_vals)/len(self.ptime_vals), 3), round(max(self.ptime_vals), 3)
 
 	def ready(self):
 		return self.n_frames >= self.avg_frames

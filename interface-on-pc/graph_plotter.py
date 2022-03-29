@@ -8,7 +8,7 @@ from pyqtgraph.Qt import QtGui, QtCore
 import pyqtgraph as pg
 
 
-def qt_plotter(setpoint_plot, ball_pose_plot, plot_terminate, max_limit=800, size=800, identifier=''):
+def qt_plotter(setpoint_plot, ball_pose_plot, pid_plot, plot_terminate, max_limit=800, size=800, identifier=''):
 
 	app = QtGui.QApplication([])
 	timer = QtCore.QTimer()
@@ -41,10 +41,21 @@ def qt_plotter(setpoint_plot, ball_pose_plot, plot_terminate, max_limit=800, siz
 	error_y_curve = graph2.plot(t_vec, error_y_Vec, pen='r', name="error_y_curve")
 	error_xy_curve = graph2.plot(t_vec, error_y_Vec, pen='w', name="error_xy_curve")
 
+	win.nextRow()
+	graph3 = win.addPlot(title='pid v/s time')
+	graph3.setRange(yRange=[-max_limit, max_limit])
+	graph3.addLegend()
+	pid_x_vec = deque(np.zeros(size, dtype='uint8'))
+	pid_y_vec = deque(np.zeros(size, dtype='uint8'))
+
+	pid_x_curve = graph3.plot(t_vec, pid_x_vec, pen='b', name="pid_x_vec")
+	pid_y_curve = graph3.plot(t_vec, pid_y_vec, pen='r', name="pid_y_vec")
+
 	def updateGraph():
 		try:
 			set_pose_x, set_pose_y = setpoint_plot
 			ball_pose_x, ball_pose_y = ball_pose_plot
+			pid_x_value, pid_y_value = pid_plot
 			error_x = set_pose_x - ball_pose_x
 			error_y = set_pose_y - ball_pose_y
 
@@ -71,6 +82,14 @@ def qt_plotter(setpoint_plot, ball_pose_plot, plot_terminate, max_limit=800, siz
 			error_x_curve.setData(t_vec, error_x_vec)
 			error_y_curve.setData(t_vec, error_y_Vec)
 			error_xy_curve.setData(t_vec, error_xy_Vec)
+
+			pid_x_vec.popleft()
+			pid_x_vec.append(pid_x_value)
+			pid_y_vec.popleft()
+			pid_y_vec.append(pid_y_value)
+			pid_x_curve.setData(t_vec, pid_x_vec)
+			pid_y_curve.setData(t_vec, pid_y_vec)
+
 
 			app.processEvents()
 
