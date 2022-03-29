@@ -97,6 +97,7 @@ class SetMqttController(threading.Thread):
 		self.two_pi = 6.28
 		self.r = 200
 		self.f = 0.1
+		self.graphShown = 0
 		self.rad = 0
 		self.frame_center = ()
 		self.frame_size = ()
@@ -249,7 +250,7 @@ class SetMqttController(threading.Thread):
 
 class ImageProcessor(threading.Thread):
 	num_no_ball_frames = 0
-	def __init__(self, mat):
+	def __init__(self, mat, pool_handler):
 		super().__init__()
 		self.id = perf_counter()
 		self.ball_pose = ()
@@ -263,6 +264,7 @@ class ImageProcessor(threading.Thread):
 		self.kernel_close = np.ones((5, 5))
 		self.frame = None
 		self.daemon = True
+		self.pool_handler = pool_handler
 		self.start()
 
 	def run(self):
@@ -309,8 +311,8 @@ class ImageProcessor(threading.Thread):
 					self.event.clear()
 					fps.ptime_update((perf_counter() - self.id)*1000)
 					# Return ourselves to the processor_pool
-					with pool_lock:
-						processor_pool.append(self)
+					with self.pool_handler.lock:
+						self.pool_handler.pool.append(self)
 
 	def findBall(self):
 
@@ -430,36 +432,42 @@ def find_table(ids_present):
 	print(" FOUND TABLE ".center(50, '■'))
 
 
-def streams():
-	global done
-	times_starved = 0
-	while not done:
-		try:
-			with pool_lock:
-				if processor_pool:
-					processor = processor_pool.pop()
-				else:
-					processor = None
-			if processor:
-				yield processor.stream
-				processor.id = perf_counter()
-				processor.event.set()
-				fps.fps_update()
-			else:
-				# When the pool is starved, wait a while for it to refill
-				#print("pool is starved")
-				sleep(0.02)
-				times_starved += 1
-			if fps.ready():
-				curr_fps = fps.get_fps()
-				fDropped = int((fps.dropped_frames/fps.avg_frames)*curr_fps)
-				print(f"\rFPS: {curr_fps} | Ptime: {fps.get_pTime()} ms | fDropped: {fDropped}/{curr_fps} | {times_starved}".ljust(65), end='')
-				fps.reset()
-				times_starved = 0
+class ProcessOutput(object):
+	def __init__(self, num_image_processors):
+		self.lock = threading.Lock()
+		self.pool = [ImageProcessor(mat, self) for _ in range(num_image_processors)]
+		self.processor = None
+		self.times_starved = 0
 
-		except KeyboardInterrupt:
-			print("Ctrl-c pressed ...")
-			done = 1
+	def write(self, buf):
+		if buf.startswith(b'\xff\xd8'):
+			with self.lock:
+				if self.pool:
+					self.processor = self.pool.pop()
+				else:
+					self.times_starved += 1
+					self.processor = None
+
+			if self.processor:
+				self.processor.stream.write(buf)
+				self.processor.id = perf_counter()
+				self.processor.event.set()
+				fps.fps_update()
+
+		if fps.ready():
+			curr_fps = fps.get_fps()
+			fDropped = int((fps.dropped_frames/fps.avg_frames)*curr_fps)
+			print(f"\rFPS: {curr_fps} | Ptime: {fps.get_pTime()} ms | fDropped: {fDropped}/{curr_fps} | {self.times_starved}".ljust(65), end='')
+			fps.reset()
+			self.times_starved = 0
+
+	def flush(self):
+		self.processor.terminated = True
+		for proc in self.pool:
+			proc.terminated = True
+			proc.join(2)
+			print(proc)
+
 
 if __name__ == '__main__':
 
@@ -467,10 +475,9 @@ if __name__ == '__main__':
 	DEBUG = True
 	video_src = 0
 	use_mqtt = 1
-	num_image_processors = 6
+	num_image_processors = 4
 	done = 0
 
-	pool_lock = threading.Lock()
 	id_lock = threading.Lock()
 	fps = FPS()
 
@@ -495,17 +502,12 @@ if __name__ == '__main__':
 		sleep(2)
 		camera.capture_sequence(find_table([0, 1, 2, 3]), use_video_port=True)
 		sleep(2)
-		processor_pool = [ImageProcessor(mat) for _ in range(num_image_processors)]
-		all_threads = processor_pool[::-1]
-		if use_mqtt:
-			all_threads.insert(0, set_mqtt_ctrl)
-		camera.capture_sequence(streams(), use_video_port=True)
-
+		output = ProcessOutput(num_image_processors)
+		camera.start_recording(output, format='mjpeg')
+		while not done:
+			camera.wait_recording(1)
+		camera.stop_recording()
 
 	servo_ctrl.close_serial_port()
-
-	for thread in all_threads:
-		thread.terminated = True
-		thread.join(2)
-		print(thread)
+	set_mqtt_ctrl.terminated = True
 	print(" Closed All ".center(50, '■'))
