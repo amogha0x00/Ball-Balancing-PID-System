@@ -91,7 +91,6 @@ class SetMqttController(threading.Thread):
 		self.ball_lock = threading.Lock()
 		self.set_lock = threading.Lock()
 		self.pid_lock = threading.Lock()
-
 		self._ball_pose = ()
 		self.last_id = -1
 		self.mode = 0
