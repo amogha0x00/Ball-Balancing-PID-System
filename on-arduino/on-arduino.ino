@@ -1,3 +1,7 @@
+/*
+	Author: Amoghavarsha S G
+*/
+
 #include <Servo.h>
 
 Servo xServo;
