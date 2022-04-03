@@ -97,7 +97,6 @@ class SetMqttController(threading.Thread):
 		self.two_pi = 6.28
 		self.r = 200
 		self.f = 0.1
-		self.graphShown = 0
 		self.rad = 0
 		self.frame_center = ()
 		self.frame_size = ()
