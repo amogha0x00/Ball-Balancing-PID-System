@@ -8,10 +8,7 @@ import cv2
 import numpy as np
 import threading
 from time import sleep, perf_counter
-from multiprocessing import Process, Array, Value
 import json
-import subprocess
-import platform
 from iot import IOT
 import pickle
 # import traceback
@@ -28,7 +25,7 @@ class SetDispMqttController:
 		self.set_lock = threading.Lock()
 		self.table_img = cv2.imread("background.jpg", -1)
 		self.return_img = np.array(self.table_img)
-		self.table_height, self.table_width = self.table_img.shape[:2] 
+		self.table_height, self.table_width = self.table_img.shape[:2]
 		self.frame_center = (self.table_width//2, self.table_height//2)
 		self._setpoint = ()
 		self._ball_pose = ()
@@ -243,14 +240,7 @@ if __name__ == '__main__':
 	DEBUG = True
 	show_interface = 1
 	fps = FPS()
-	if platform.system() == 'Windows':
-		Process(target=subprocess.run, args=[['py', 'plot_graph.py']]).start()
 	set_disp_mqtt_ctrl = SetDispMqttController()
-
-	# set_disp_mqtt_ctrl.ball_pose = (0, 0), 25
-	# threading.Thread(target=get_circle_corr, daemon=True).start()
 	set_disp_mqtt_ctrl.run()
 	print('\n')
 	print('EXITING'.center(50, '#'))
-	# with open('animated_data.pkl', 'wb') as outp:
-	#     pickle.dump(set_disp_mqtt_ctrl.animated, outp, pickle.HIGHEST_PROTOCOL)

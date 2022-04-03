@@ -4,10 +4,8 @@
 
 from graph_plotter import qt_plotter
 from multiprocessing import Array, Value
-from time import sleep
 from iot import IOT
 import json
-import yaml
 
 
 def pose_callback(client, userdata, msg):
