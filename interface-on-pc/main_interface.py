@@ -34,7 +34,13 @@ class SetDispMqttController:
 		self.mode = 0
 		self.setpoint = self.frame_center
 
+	def initiate_mqtt_communication(self):
+		self.iot.mqtt_subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)
+		self.iot.mqtt_subscribe_thread_start(self.frame_size_callback, "frame_size", 2)
+		self.iot.mqtt_publish("key_cmd", json.dumps("frame_size"), 2)
+
 	def run(self):
+		threading.Thread(target=self.initiate_mqtt_communication).start()
 		cv2.namedWindow('Processed Video Feed', cv2.WINDOW_NORMAL)
 		cv2.resizeWindow('Processed Video Feed', int(self.table_width*1.1), int(self.table_height*1.1))
 		cv2.setMouseCallback('Processed Video Feed', self.set_setpoint)
@@ -55,10 +61,6 @@ class SetDispMqttController:
 			cv2.setTrackbarPos('y_Kp(x100)', 'Processed Video Feed', int(y_Kp*100))
 			cv2.setTrackbarPos('y_Ki(x100)', 'Processed Video Feed', int(y_Ki*100))
 			cv2.setTrackbarPos('y_Kd(x100)', 'Processed Video Feed', int(y_Kd*100))
-
-		self.iot.mqtt_subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)		
-		self.iot.mqtt_subscribe_thread_start(self.frame_size_callback, "frame_size", 2)
-		self.iot.mqtt_publish("key_cmd", json.dumps("frame_size"), 2)
 
 		while not self.terminated:
 			setpoint = self.setpoint
