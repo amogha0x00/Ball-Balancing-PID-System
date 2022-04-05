@@ -465,6 +465,7 @@ if __name__ == '__main__':
 
 	# !!!!!!!!!!!!!!! Configs !!!!!!!!!!!!!!!!!
 	DEBUG = True
+	aruco_marker_order = [0, 1, 2, 3]
 	video_src = 0
 	use_mqtt = 1
 	num_image_processors = 6
@@ -493,7 +494,7 @@ if __name__ == '__main__':
 		camera.resolution = (640, 480)
 		camera.framerate = 90
 		sleep(2)
-		camera.capture_sequence(find_table([0, 1, 2, 3]), use_video_port=True)
+		camera.capture_sequence(find_table(aruco_marker_order), use_video_port=True)
 		sleep(2)
 		processor_pool = [ImageProcessor(mat) for _ in range(num_image_processors)]
 		all_threads = processor_pool[::-1]
