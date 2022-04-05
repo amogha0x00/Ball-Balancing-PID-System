@@ -11,6 +11,11 @@ This project consists in the realization of a Ball-Plate system with 2 degree of
 
 * All the data will be sent to the Python program running in another computer using MQTT protocol. And the results would be plotted.
 
+## Team members:
+* Amoghavarsha S G
+* Niranjana Jois H C
+* Kiran C N
+
 ## Block Diagram
 ![overall_block_diagram](docs/images/overall_block_diagram.jpg)
 ![mqtt_block_diagram](docs/images/mqtt_block_diagram.jpg)
@@ -55,6 +60,9 @@ This project consists in the realization of a Ball-Plate system with 2 degree of
 * **PC**
   * Go to interface-on-pc directory
   * run `startInterface.sh` if on linux or `startInterface.bat` if on windows
+  * Interface Image
+
+    ![interface](docs/images/interface.png)
 
 * **Table**
   * Table Image
