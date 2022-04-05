@@ -31,7 +31,7 @@ void loop() {
 		cmd[i] = '\0';
 		// atoi only reads till first '\0' character
 		xServoVal = atoi(cmd);
-		// atoi reads from first '\0' secound '\0' which is at index `cmd_len`
+		// atoi reads from first '\0' till secound '\0' which is at index `cmd_len`
 		yServoVal = atoi(cmd + i + 1);
 
 		// Serial.println(xServoVal);
