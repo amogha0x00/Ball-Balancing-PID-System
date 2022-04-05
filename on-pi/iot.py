@@ -12,13 +12,13 @@ class IOT:
 		self.broker_port = broker_port
 		self.pub_client_exits = False
 		self.lock = threading.Lock()
-		
+
 	@staticmethod
 	def on_connect(client, userdata, flags, rc, sub_topic, qos):
 		print(f"Connected With Result Code {rc}")
 		(rc, mid) = client.subscribe(sub_topic, qos=qos)
 		if not rc:
-			print('subscribed to topic!')
+			print(f'subscribed to topic: {sub_topic} qos: {qos}')
 		return rc
 
 	@staticmethod
