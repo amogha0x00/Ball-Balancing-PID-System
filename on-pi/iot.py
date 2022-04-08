@@ -4,14 +4,12 @@
 
 import paho.mqtt.client as mqtt
 from time import sleep
-import threading
 
 class IOT:
 	def __init__(self, broker_url, broker_port=1883):
 		self.broker_url = broker_url
 		self.broker_port = broker_port
 		self.pub_client_exits = False
-		self.lock = threading.Lock()
 
 	@staticmethod
 	def on_connect(client, userdata, flags, rc, sub_topic, qos):
@@ -44,23 +42,22 @@ class IOT:
 			return -1
 
 	def mqtt_publish_reuse_client(self, pub_topic, payload, qos, timeout=None):
-		with self.lock:
-			try:
-				if not self.pub_client_exits:
-					self.pub_client = mqtt.Client()
-					self.pub_client.connect(self.broker_url, self.broker_port)
-					self.pub_client.loop_start()
-					self.pub_client_exits = True			
-				pub_info = self.pub_client.publish(pub_topic, payload, qos=qos, retain=False)
-				if timeout:
-					sleep(timeout)
-				else:
-					pub_info.wait_for_publish()
-				return pub_info[0]
+		try:
+			if not self.pub_client_exits:
+				self.pub_client = mqtt.Client()
+				self.pub_client.connect(self.broker_url, self.broker_port)
+				self.pub_client.loop_start()
+				self.pub_client_exits = True
+			pub_info = self.pub_client.publish(pub_topic, payload, qos=qos, retain=False)
+			if timeout:
+				sleep(timeout)
+			else:
+				pub_info.wait_for_publish()
+			return pub_info[0]
 
-			except Exception as e:
-				print(e)
-				return -1
+		except Exception as e:
+			print(e)
+			return -1
 
 	def mqtt_publish(self, pub_topic, payload, qos):
 		"""
