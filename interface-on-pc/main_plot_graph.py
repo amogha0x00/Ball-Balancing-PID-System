@@ -2,6 +2,7 @@
 	Author : Amoghavarsha S G
 """
 
+import threading
 from graph_plotter import qt_plotter
 from multiprocessing import Array, Value
 from iot import IOT
@@ -24,20 +25,23 @@ def key_callback(client, userdata, msg):
 	if key == 'q':
 		plot_terminate.value = 1
 
+def initiate_mqtt_communication(iot_obj, pose_callback, key_callback, pose_topic, key_cmd_topic):
+	iot_obj.mqtt_subscribe_thread_start(pose_callback, pose_topic, 0)
+	iot_obj.mqtt_subscribe_thread_start(key_callback, key_cmd_topic, 2)
+
 
 if __name__ == '__main__':
 
 	broker_url = "raspberrypi.local"
 
 	iot = IOT(broker_url=broker_url)
-	sub_topic = 'ball_set_pose'
-	qos = 0
+	pose_topic = 'ball_set_pose'
+	key_cmd_topic = "key_cmd"
 
 	plot_terminate = Value('i', 0)
 	setpoint_plot = Array('i', [0, 0])
 	ball_pose_plot = Array('i', [0, 0])
 	pid_plot = Array('d', [0, 0])
 
-	iot.mqtt_subscribe_thread_start(pose_callback, sub_topic, qos)
-	iot.mqtt_subscribe_thread_start(key_callback, 'key_cmd', 2)
+	threading.Thread(target=initiate_mqtt_communication, args=(iot, pose_callback, key_callback, pose_topic, key_cmd_topic), daemon=True).start()
 	qt_plotter(setpoint_plot, ball_pose_plot, pid_plot, plot_terminate)
