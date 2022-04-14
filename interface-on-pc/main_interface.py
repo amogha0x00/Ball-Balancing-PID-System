@@ -40,7 +40,6 @@ class SetDispMqttController:
 		self.iot.mqtt_publish("key_cmd", json.dumps("frame_size"), 2)
 
 	def run(self):
-		threading.Thread(target=self.initiate_mqtt_communication, daemon=True).start()
 		cv2.namedWindow('Processed Video Feed', cv2.WINDOW_NORMAL)
 		cv2.resizeWindow('Processed Video Feed', int(self.table_width*1.1), int(self.table_height*1.1))
 		cv2.setMouseCallback('Processed Video Feed', self.set_setpoint)
@@ -61,6 +60,8 @@ class SetDispMqttController:
 			cv2.setTrackbarPos('y_Kp(x100)', 'Processed Video Feed', int(y_Kp*100))
 			cv2.setTrackbarPos('y_Ki(x100)', 'Processed Video Feed', int(y_Ki*100))
 			cv2.setTrackbarPos('y_Kd(x100)', 'Processed Video Feed', int(y_Kd*100))
+
+		self.initiate_mqtt_communication()
 
 		while not self.terminated and cv2.getWindowProperty('Processed Video Feed', cv2.WND_PROP_VISIBLE):
 			setpoint = self.setpoint
@@ -184,7 +185,6 @@ class SetDispMqttController:
 		if event == cv2.EVENT_LBUTTONDOWN:
 			self.mode = 0
 			threading.Thread(target=self.iot.mqtt_publish_reuse_client, args=('key_cmd', json.dumps(f"S[{x}, {y}]"), 2)).start()
-
 
 	def set_tuning(self, pos, parameter):
 		threading.Thread(target=self.iot.mqtt_publish_reuse_client, args=('key_cmd', json.dumps(f"T{parameter}{pos}"), 2)).start()

@@ -25,10 +25,6 @@ def key_callback(client, userdata, msg):
 	if key == 'q':
 		plot_terminate.value = 1
 
-def initiate_mqtt_communication(iot_obj, pose_callback, key_callback, pose_topic, key_cmd_topic):
-	iot_obj.mqtt_subscribe_thread_start(pose_callback, pose_topic, 0)
-	iot_obj.mqtt_subscribe_thread_start(key_callback, key_cmd_topic, 2)
-
 
 if __name__ == '__main__':
 
@@ -43,5 +39,7 @@ if __name__ == '__main__':
 	ball_pose_plot = Array('i', [0, 0])
 	pid_plot = Array('d', [0, 0])
 
-	threading.Thread(target=initiate_mqtt_communication, args=(iot, pose_callback, key_callback, pose_topic, key_cmd_topic), daemon=True).start()
+	iot.mqtt_subscribe_thread_start(pose_callback, pose_topic, 0)
+	iot.mqtt_subscribe_thread_start(key_callback, key_cmd_topic, 2)
+
 	qt_plotter(setpoint_plot, ball_pose_plot, pid_plot, plot_terminate)
