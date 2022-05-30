@@ -487,7 +487,7 @@ if __name__ == '__main__':
 	y_axis_pid = PID("y", Kp=1.85, Ki=0.1, Kd=1.36)
 	y_axis_pid.output_limits = -750, 750
 
-	x_axis_pid.sample_time, y_axis_pid.sample_time = 1/33, 1/33
+	x_axis_pid.sample_time, y_axis_pid.sample_time = 1/80, 1/80
 
 	servo_ctrl = ServoController()
 	
