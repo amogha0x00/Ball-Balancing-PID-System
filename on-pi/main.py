@@ -14,14 +14,14 @@ import io
 import math
 import traceback
 import json
-from iot import IOT
 import picamera
 ###### Written in this Folder ######
+from iot import MQTT
 from PID import PID
 
 class ServoController:
 
-	def __init__(self, x_offset=1570, y_offset=1420, seperator='#', stopByte='$', plate_piviot_len=8, servo_arm_len=3.2, camera_distance=45):
+	def __init__(self, x_offset=1535, y_offset=1410, seperator='#', stopByte='$', plate_piviot_len=8, servo_arm_len=3.2, camera_distance=45):
 		"""
 			Initialize a new Servo Controller
 			:param plate_piviot_len: Distance between connected servo rod and piviot
@@ -105,15 +105,15 @@ class SetMqttController(threading.Thread):
 		self.terminated = 0
 		self.daemon = True
 
-		self.iot = IOT('localhost')
-		self.iot.mqtt_subscribe_thread_start(self.cmd_key_callback, "key_cmd", 2)
+		self.mqtt = MQTT('localhost')
+		self.mqtt.subscribe_thread_start(self.cmd_key_callback, "key_cmd", 2)
 		self.start()
 
 	def run(self):
 		threading.Thread(target=self.setpoint_change_thread, args=(1/15,), daemon=True).start()
 		while not self.terminated:
 			ball_pose = self.ball_pose
-			self.iot.mqtt_publish_reuse_client('ball_set_pose', json.dumps({"setpoint": self.setpoints, "ball_pose": ball_pose, "pid_values": self.pid_values}), 0, None)
+			self.mqtt.publish_reuse_client('ball_set_pose', json.dumps({"setpoint": self.setpoints, "ball_pose": ball_pose, "pid_values": self.pid_values}), 0, None)
 
 	def setpoint_change_thread(self, secs):
 		while not self.terminated:
@@ -163,7 +163,7 @@ class SetMqttController(threading.Thread):
 			done = 1
 			self.terminated = 1
 		elif key == 'frame_size':
-			threading.Thread(target=set_mqtt_ctrl.iot.mqtt_publish, args=('frame_size', json.dumps(self.frame_size), 2)).start()
+			threading.Thread(target=set_mqtt_ctrl.mqtt.publish, args=('frame_size', json.dumps(self.frame_size), 2)).start()
 		elif key == 'o':
 			self.mode = 1
 			self.r = 100
@@ -419,7 +419,7 @@ def find_table(ids_present):
 			frame_size = frame.shape[1], frame.shape[0]
 			set_mqtt_ctrl.frame_size = frame_size
 			set_mqtt_ctrl.frame_center = frame_size[0]//2, frame_size[1]//2
-			set_mqtt_ctrl.iot.mqtt_publish('frame_size', json.dumps(frame_size), 2)
+			set_mqtt_ctrl.mqtt.publish('frame_size', json.dumps(frame_size), 2)
 
 			set_mqtt_ctrl.set_all_setpoints(set_mqtt_ctrl.frame_center)
 			break

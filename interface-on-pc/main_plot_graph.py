@@ -5,7 +5,7 @@
 import threading
 from graph_plotter import qt_plotter
 from multiprocessing import Array, Value
-from iot import IOT
+from iot import MQTT
 import json
 
 
@@ -30,7 +30,7 @@ if __name__ == '__main__':
 
 	broker_url = "raspberrypi.local"
 
-	iot = IOT(broker_url=broker_url)
+	mqtt = MQTT(broker_url=broker_url)
 	pose_topic = 'ball_set_pose'
 	key_cmd_topic = "key_cmd"
 
@@ -39,7 +39,7 @@ if __name__ == '__main__':
 	ball_pose_plot = Array('i', [0, 0])
 	pid_plot = Array('d', [0, 0])
 
-	iot.mqtt_subscribe_thread_start(pose_callback, pose_topic, 0)
-	iot.mqtt_subscribe_thread_start(key_callback, key_cmd_topic, 2)
+	mqtt.subscribe_thread_start(pose_callback, pose_topic, 0)
+	mqtt.subscribe_thread_start(key_callback, key_cmd_topic, 2)
 
 	qt_plotter(setpoint_plot, ball_pose_plot, pid_plot, plot_terminate)

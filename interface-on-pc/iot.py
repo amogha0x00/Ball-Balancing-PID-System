@@ -6,7 +6,7 @@ import threading
 import paho.mqtt.client as mqtt
 from time import sleep
 
-class IOT:
+class MQTT:
 	def __init__(self, broker_url, broker_port=1883):
 		self.broker_url = broker_url
 		self.broker_port = broker_port
@@ -27,13 +27,13 @@ class IOT:
 			return func(client, userdata, flags, rc, sub_topic, qos)
 		return wrapper
 
-	def mqtt_subscribe_thread_start(self, on_message, sub_topic, qos):
+	def subscribe_thread_start(self, on_message, sub_topic, qos):
 		"""
 			This function subscribes to any mqtt topic given on "sub_topic" and makes "on_message" as on_message cb function
 		"""
 		try:
 			client = mqtt.Client()
-			on_connect = IOT.sub_on_connect(IOT.on_connect, sub_topic, qos)
+			on_connect = MQTT.sub_on_connect(MQTT.on_connect, sub_topic, qos)
 			client.on_connect = on_connect
 			client.on_message = on_message
 			client.connect(self.broker_url, self.broker_port)
@@ -43,7 +43,7 @@ class IOT:
 			print(e)
 			return -1
 
-	def mqtt_publish_reuse_client(self, pub_topic, payload, qos, timeout=None):
+	def publish_reuse_client(self, pub_topic, payload, qos, timeout=None):
 		with self.lock:
 			try:
 				if not self.pub_client_exits:
@@ -62,7 +62,7 @@ class IOT:
 				print(e)
 				return -1
 
-	def mqtt_publish(self, pub_topic, payload, qos):
+	def publish(self, pub_topic, payload, qos):
 		"""
 			This function publish's on any mqtt topic given on "pub_topic" with message given as "payload"
 		"""

@@ -9,14 +9,14 @@ import numpy as np
 import threading
 from time import sleep, perf_counter
 import json
-from iot import IOT
+from iot import MQTT
 import pickle
 # import traceback
 
 class SetDispMqttController:
 	def __init__(self):
 		broker_url = "raspberrypi.local"
-		self.iot = IOT(broker_url=broker_url)
+		self.mqtt = MQTT(broker_url=broker_url)
 
 		with open('ball_imgs.pkl', 'rb') as outp:
 			self.ball_imgs = pickle.load(outp)
@@ -35,9 +35,9 @@ class SetDispMqttController:
 		self.setpoint = self.frame_center
 
 	def initiate_mqtt_communication(self):
-		self.iot.mqtt_subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)
-		self.iot.mqtt_subscribe_thread_start(self.frame_size_callback, "frame_size", 2)
-		self.iot.mqtt_publish("key_cmd", json.dumps("frame_size"), 2)
+		self.mqtt.subscribe_thread_start(self.pose_callback, "ball_set_pose", 0)
+		self.mqtt.subscribe_thread_start(self.frame_size_callback, "frame_size", 2)
+		self.mqtt.publish("key_cmd", json.dumps("frame_size"), 2)
 
 	def run(self):
 		cv2.namedWindow('Processed Video Feed', cv2.WINDOW_NORMAL)
@@ -87,7 +87,7 @@ class SetDispMqttController:
 			key = chr(cv2.waitKey(1) & 0xFF)
 
 			if key in ['q', 'o', '8', 'r', 'f', '-', '+']:
-				self.iot.mqtt_publish_reuse_client('key_cmd', json.dumps(key), 2)
+				self.mqtt.publish_reuse_client('key_cmd', json.dumps(key), 2)
 
 			if key == 'q':
 				self.terminated = 1
@@ -158,7 +158,7 @@ class SetDispMqttController:
 		size = json.loads(msg.payload.decode('UTF-8'))
 		if size == []:
 			sleep(1)
-			self.iot.mqtt_publish("key_cmd", json.dumps("frame_size"), 2)
+			self.mqtt.publish("key_cmd", json.dumps("frame_size"), 2)
 			return
 		client.loop_stop()
 		client.unsubscribe('frame_size')
@@ -184,10 +184,10 @@ class SetDispMqttController:
 	def set_setpoint(self, event, x, y, flags, param):
 		if event == cv2.EVENT_LBUTTONDOWN:
 			self.mode = 0
-			threading.Thread(target=self.iot.mqtt_publish_reuse_client, args=('key_cmd', json.dumps(f"S[{x}, {y}]"), 2)).start()
+			threading.Thread(target=self.mqtt.publish_reuse_client, args=('key_cmd', json.dumps(f"S[{x}, {y}]"), 2)).start()
 
 	def set_tuning(self, pos, parameter):
-		threading.Thread(target=self.iot.mqtt_publish_reuse_client, args=('key_cmd', json.dumps(f"T{parameter}{pos}"), 2)).start()
+		threading.Thread(target=self.mqtt.publish_reuse_client, args=('key_cmd', json.dumps(f"T{parameter}{pos}"), 2)).start()
 
 
 class FPS():
