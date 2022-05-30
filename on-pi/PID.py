@@ -88,6 +88,9 @@ class PID(object):
 			# Only update every sample_time seconds
 			return self._last_output
 
+		if(self._last_input is not None):
+			input_ = int((0.7 * input_) + (0.3 * self._last_input))
+
 		# Compute error terms
 		error = self.setpoint - input_
 		d_input = input_ - (self._last_input if (self._last_input is not None) else input_)
