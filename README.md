@@ -75,13 +75,19 @@ This project consists in the realization of a Ball-Plate system with 2 degree of
     * Bottom Right: ID 2
     * Bottom Left:  ID 3
   * You can change the ID's or their order. If you do, then:
-    * in on-pi/main.py change `aruco_marker_order` list in the order of mentioned above.
+    * In `on-pi/main.py` change the list `aruco_marker_order` in order mentioned above.
+
 * **Servo Motors**
   * Servo Placement
 
     ![servo_placement](docs/images/servo_placement.jpg)
 
   * Distance from centre to both x and y axis servo: `8cm`
-* **Pi Camera**
-  
-  ![picamera](docs/images/pi_picamera.jpg)
+
+* **Raspberry Pi and Pi Camera**
+
+  ![raspberry pi and picamera](docs/images/pi_picamera.jpg)
+
+* **Overall Structure**
+
+  ![overall structure](docs/images/structure.jpg)
