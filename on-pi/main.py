@@ -481,10 +481,10 @@ if __name__ == '__main__':
 	id_lock = threading.Lock()
 	fps = FPS()
 
-	x_axis_pid = PID("x", Kp=1.70, Ki=0.08, Kd=1.26)
+	x_axis_pid = PID("x", Kp=1.70, Ki=0.08, Kd=1.26, exp_filter_alpha=0.85)
 	x_axis_pid.output_limits = -750, 750
 
-	y_axis_pid = PID("y", Kp=1.85, Ki=0.1, Kd=1.36)
+	y_axis_pid = PID("y", Kp=1.85, Ki=0.1, Kd=1.36, exp_filter_alpha=0.9)
 	y_axis_pid.output_limits = -750, 750
 
 	x_axis_pid.sample_time, y_axis_pid.sample_time = 1/80, 1/80
