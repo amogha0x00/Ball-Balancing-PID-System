@@ -22,6 +22,7 @@ class PID(object):
 		auto_mode=True,
 		proportional_on_measurement=False,
 		error_map=None,
+		exp_filter_alpha=1,
 	):
 		"""
 		Initialize a new PID controller.
@@ -46,11 +47,10 @@ class PID(object):
 		:param error_map: Function to transform the error value in another constrained value.
 		"""
 		self.axis = axis
-		self._current_time = perf_counter
 		self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
-		self._setpoint = setpoint
 		self.sample_time = sample_time
-		self.lock = threading.Lock()
+		self.exp_filter_alpha = exp_filter_alpha
+		self.exp_filter_beta = 1 - exp_filter_alpha # beta = 1 - alpha
 
 		self._auto_mode = auto_mode
 		self.proportional_on_measurement = proportional_on_measurement
@@ -59,12 +59,15 @@ class PID(object):
 		self._proportional = 0
 		self._integral = 0
 		self._derivative = 0
+		self._setpoint = setpoint
 
 		self._last_time = None
 		self._last_output = None
 		self._last_input = None
-
 		self.output_limits = output_limits
+
+		self._current_time = perf_counter
+		self.lock = threading.Lock()
 		self.reset()
 
 	def __call__(self, input_):
@@ -89,7 +92,8 @@ class PID(object):
 			return self._last_output
 
 		if(self._last_input is not None):
-			input_ = int((0.7 * input_) + (0.3 * self._last_input))
+			# y(t) = (alpha * x(t)) + (beta * y(t - 1))
+			input_ = int((self.exp_filter_alpha * input_) + (self.exp_filter_beta * self._last_input))
 
 		# Compute error terms
 		error = self.setpoint - input_
