@@ -108,11 +108,13 @@ class SetDispMqttController:
 		st_time = perf_counter()
 		ball_img = self.ball_imgs[radius]
 		ball_height, ball_width = ball_img.shape[:2]
-		ball_center = (ball_width//2, ball_height//2)
-		
-		if (ball_pose[1] - ball_center[1] > - ball_height) and (ball_pose[1] + ball_center[1] < self.table_height + ball_height) and (ball_pose[0] - ball_center[0] > - ball_width) and (ball_pose[0] + ball_center[0] < self.table_width + ball_width): 
-			tmin_x, tmin_y, tmax_x, tmax_y = ball_pose[0] - ball_center[0], ball_pose[1] - ball_center[1], ball_pose[0] + ball_center[0], ball_pose[1] + ball_center[1]
-			bmin_x, bmin_y, bmax_x, bmax_y = 0, 0, ball_width, ball_height
+		tmin_x = ball_pose[0] - radius
+		tmin_y = ball_pose[1] - radius
+		tmax_x = ball_pose[0] + radius
+		tmax_y = ball_pose[1] + radius
+		bmin_x, bmin_y, bmax_x, bmax_y = 0, 0, ball_width, ball_height
+
+		if (tmin_y > - ball_height) and (tmax_y < self.table_height + ball_height) and (tmin_x > - ball_width) and (tmax_x < self.table_width + ball_width):
 			if tmin_x < 0:
 				bmin_x = abs(tmin_x)
 				tmin_x = 0
@@ -137,7 +139,6 @@ class SetDispMqttController:
 		if fps.ready():
 			print(f"\rFPS: {fps.get_fps()} | Ptime: {fps.get_ptime()} ms".ljust(65), end='')
 			fps.reset()
-
 
 	@property
 	def ball_pose(self):
