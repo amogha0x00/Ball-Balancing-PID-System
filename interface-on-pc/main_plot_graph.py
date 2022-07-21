@@ -10,7 +10,6 @@ import json
 
 
 def pose_callback(client, userdata, msg):
-	# print(json.loads(msg.payload.decode('UTF-8')))
 	pose = json.loads(msg.payload.decode('UTF-8'))
 	ball_pose = pose['ball_pose']
 	pid_values = pose['pid_values']

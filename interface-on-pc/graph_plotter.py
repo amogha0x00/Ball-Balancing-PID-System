@@ -48,8 +48,8 @@ def qt_plotter(setpoint_plot, ball_pose_plot, pid_plot, plot_terminate, max_limi
 	pid_x_vec = deque(np.zeros(size, dtype='uint8'))
 	pid_y_vec = deque(np.zeros(size, dtype='uint8'))
 
-	pid_x_curve = graph3.plot(t_vec, pid_x_vec, pen='b', name="pid_x_vec")
-	pid_y_curve = graph3.plot(t_vec, pid_y_vec, pen='r', name="pid_y_vec")
+	pid_x_curve = graph3.plot(t_vec, pid_x_vec, pen='b', name="pid_x_curve")
+	pid_y_curve = graph3.plot(t_vec, pid_y_vec, pen='r', name="pid_y_curve")
 
 	def updateGraph():
 		try:
