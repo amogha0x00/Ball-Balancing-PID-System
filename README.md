@@ -11,6 +11,8 @@ This project consists in the realization of a Ball-Plate system with 2 degree of
 
 * All the data will be sent to the Python program running in another computer using MQTT protocol. And the results would be plotted.
 
+[![Watch the video](https://img.youtube.com/vi/1mTjI_xX32I/maxresdefault.jpg)](https://youtu.be/1mTjI_xX32I)
+
 ## Team members:
 * Amoghavarsha S G
 * Niranjana Jois H C
